@@ -51,6 +51,7 @@ form.addEventListener('submit', async (e) => {
 
     renderWarnings(data.warnings || []);
     renderSiteInfo(data.url, data.meta.general);
+    renderScreenshot(data.screenshotUrl);
     renderPreviews(data.previews);
     renderRawData(data.meta);
     if (window.lucide) lucide.createIcons();
@@ -90,6 +91,14 @@ function renderSiteInfo(url, general) {
   if (general.title) parts.push(general.title);
   if (jsToggle.checked) parts.push('JS rendered');
   meta.textContent = parts.join(' · ');
+}
+
+function renderScreenshot(screenshotUrl) {
+  const el = document.getElementById('screenshot-wrap');
+  const img = document.getElementById('screenshot-img');
+  if (!screenshotUrl) { el.classList.add('hidden'); return; }
+  img.src = screenshotUrl;
+  el.classList.remove('hidden');
 }
 
 function renderPreviews(previews) {

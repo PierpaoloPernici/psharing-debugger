@@ -25,11 +25,15 @@ export async function scrapeWithBrowser(url) {
     );
 
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.setViewport({ width: 1200, height: 630 });
+
+    const screenshot = await page.screenshot({ type: 'jpeg', quality: 70 });
+    const screenshotUrl = `data:image/jpeg;base64,${screenshot.toString('base64')}`;
 
     const html = await page.content();
     const finalUrl = page.url();
 
-    return { ...parseHtml(html, finalUrl), jsRender: true };
+    return { ...parseHtml(html, finalUrl), jsRender: true, screenshotUrl };
   } finally {
     await browser.close();
   }

@@ -40,6 +40,7 @@ app.post('/api/debug', async (req, res) => {
       previews,
       warnings,
       jsRender: result.jsRender,
+      screenshotUrl: result.screenshotUrl || null,
     });
   } catch (err) {
     res.status(502).json({ error: `Errore nel recupero della pagina: ${err.message}` });
