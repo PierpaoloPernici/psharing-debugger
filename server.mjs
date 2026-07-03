@@ -8,6 +8,7 @@ import { buildPreviews } from './src/previews.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3333;
+const HOST = process.env.HOST || '127.0.0.1';
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -47,11 +48,13 @@ app.post('/api/debug', async (req, res) => {
   }
 });
 
-app.listen(PORT, '127.0.0.1', () => {
-  const address = `http://127.0.0.1:${PORT}`;
+app.listen(PORT, HOST, () => {
+  const address = `http://${HOST}:${PORT}`;
   console.log(`\n  pCube Sharing Debugger — ${address}\n`);
 
-  import('open').then(({ default: open }) => {
-    open(address).catch(() => {});
-  }).catch(() => {});
+  if (HOST === '127.0.0.1') {
+    import('open').then(({ default: open }) => {
+      open(address).catch(() => {});
+    }).catch(() => {});
+  }
 });
