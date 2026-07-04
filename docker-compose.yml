@@ -5,4 +5,6 @@ services:
       - "3333:3333"
     environment:
       - HOST=0.0.0.0
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped

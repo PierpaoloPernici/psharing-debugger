@@ -1,6 +1,7 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import fs from 'node:fs';
 import { scrape } from './src/scraper.mjs';
 import { scrapeWithBrowser, closeBrowser } from './src/puppeteer.mjs';
 import { buildPreviews } from './src/previews.mjs';
@@ -11,6 +12,43 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3333;
 const HOST = process.env.HOST || '127.0.0.1';
+
+// --- Request logger ---
+const logDir = path.join(__dirname, 'logs');
+const logFile = path.join(logDir, 'requests.log');
+
+// Ensure logs directory exists (fail silently if already there)
+try { fs.mkdirSync(logDir, { recursive: true }); } catch {}
+
+function getClientIp(req) {
+  // Cloudflare
+  const cf = req.headers['cf-connecting-ip'];
+  if (cf) return cf;
+  // Proxy standard (X-Forwarded-For prende il primo IP della catena)
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) return forwarded.split(',')[0].trim();
+  // X-Real-IP (Nginx, HAProxy, altri proxy)
+  const realIp = req.headers['x-real-ip'];
+  if (realIp) return realIp;
+  // Fallback a connessione diretta
+  return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
+function logRequest(req, res, next) {
+  const start = Date.now();
+  const clientIp = getClientIp(req);
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const line = `[${new Date().toISOString()}] ${clientIp} ${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms\n`;
+    fs.appendFile(logFile, line, (err) => {
+      if (err) console.error('Errore scrittura log:', err.message);
+    });
+  });
+  next();
+}
+
+app.use(logRequest);
+// ---
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
