@@ -152,6 +152,12 @@ export function validateOpenGraph(meta) {
     }
   }
 
+  // ── Favicon ─────────────────────────────────────
+
+  if (!general.favicon) {
+    findings.push(g(Severity.INFO, 'FAVICON_MISSING', 'Nessun favicon dichiarato — i crawler cercheranno /favicon.ico di default'));
+  }
+
   // ── Duplicate OG tags ───────────────────────────
 
   const ogCounts = {};
@@ -224,6 +230,36 @@ export async function validateOgImage(ogImage) {
     } else {
       findings.push(f(Severity.WARNING, 'OG_IMAGE_UNREACHABLE',
         `og:image fetch fallito: ${e.message}`));
+    }
+  }
+
+  return { findings };
+}
+
+/**
+ * Async: HEAD request on favicon URL. Returns { findings: Finding[] }.
+ */
+export async function validateFavicon(faviconUrl) {
+  const findings = [];
+  if (!faviconUrl || !isAbsoluteUrl(faviconUrl)) return { findings };
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(faviconUrl, { method: 'HEAD', signal: controller.signal, redirect: 'follow' });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      findings.push(g(Severity.WARNING, 'FAVICON_UNREACHABLE',
+        `Favicon ha risposto HTTP ${res.status} — il browser mostrerà l'icona predefinita`, 'favicon'));
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      findings.push(g(Severity.WARNING, 'FAVICON_UNREACHABLE',
+        'Favicon HEAD request timeout — potrebbe non essere raggiungibile'));
+    } else {
+      findings.push(g(Severity.WARNING, 'FAVICON_UNREACHABLE',
+        `Favicon fetch fallito: ${e.message}`));
     }
   }
 

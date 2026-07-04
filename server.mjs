@@ -4,7 +4,7 @@ import path from 'node:path';
 import { scrape } from './src/scraper.mjs';
 import { scrapeWithBrowser, closeBrowser } from './src/puppeteer.mjs';
 import { buildPreviews } from './src/previews.mjs';
-import { validateOpenGraph, validateOgImage } from './src/opengraph.mjs';
+import { validateOpenGraph, validateOgImage, validateFavicon } from './src/opengraph.mjs';
 import { sortFindings } from './src/findings.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -49,10 +49,12 @@ app.post('/api/debug', async (req, res) => {
     const { previews } = buildPreviews(result.meta);
     const og = validateOpenGraph(result.meta);
     const ogImg = await validateOgImage(result.meta.og.image);
+    const fav = await validateFavicon(result.meta.general.favicon);
 
     const findings = sortFindings([
       ...og.findings,
       ...ogImg.findings,
+      ...fav.findings,
       ...(result.meta.jldFindings || []),
     ]);
 
