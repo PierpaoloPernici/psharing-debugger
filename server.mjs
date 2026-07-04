@@ -4,6 +4,7 @@ import path from 'node:path';
 import { scrape } from './src/scraper.mjs';
 import { scrapeWithBrowser, closeBrowser } from './src/puppeteer.mjs';
 import { buildPreviews } from './src/previews.mjs';
+import { validateOpenGraph, validateOgImage } from './src/opengraph.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -33,13 +34,17 @@ app.post('/api/debug', async (req, res) => {
       ? await scrapeWithBrowser(parsedUrl.href)
       : await scrape(parsedUrl.href);
 
-    const { previews, warnings } = buildPreviews(result.meta);
+    const { previews, warnings, flags } = buildPreviews(result.meta);
+    const ogValidation = validateOpenGraph(result.meta);
+    const ogImageValidation = await validateOgImage(result.meta.og.image);
 
     res.json({
       url: result.finalUrl,
       meta: result.meta,
       previews,
-      warnings,
+      warnings: [...warnings, ...ogValidation.warnings, ...ogImageValidation.warnings, ...(result.meta.jldWarnings || [])],
+      flags: { ...flags, ...ogValidation.flags },
+      notes: [...ogValidation.notes, ...ogImageValidation.notes],
       jsRender: result.jsRender,
       screenshotUrl: result.screenshotUrl || null,
     });

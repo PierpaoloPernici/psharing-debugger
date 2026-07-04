@@ -22,6 +22,8 @@ Strumento locale per vedere come un URL appare quando condiviso su social networ
 - `src/scraper.mjs` — fetch HTTP nativo (nessuna dipendenza extra per il fetch) + parsing cheerio
 - `src/puppeteer.mjs` — wrapper opzionale per headless Chrome
 - `src/previews.mjs` — costruisce dati preview + warning
+- `src/jsonld.mjs` — estrazione e validazione JSON-LD (cheerio → blocchi tipati con `@context`, `@type`, validazione required fields, flatten `@graph`)
+- `src/opengraph.mjs` — validazione OG (tag obbligatori, dimensioni/rapporto immagine, coerenza con `<title>`, tag secondari, duplicati)
 - `src/input.css` — sorgente Tailwind v4 (`public/style.css` è generato da questo)
 - `public/` — frontend vanilla HTML/CSS/JS (nessun framework frontend)
 

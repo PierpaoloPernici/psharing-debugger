@@ -11,11 +11,15 @@ export function buildPreviews(meta) {
   const domain = url ? new URL(url).hostname : '';
 
   const warnings = [];
+  const flags = {};
 
   if (!og.title && !twitter.title) {
     warnings.push('Nessun og:title o twitter:title definito.');
   } else if (!og.title) {
     warnings.push('og:title mancante — Twitter/X usa un fallback.');
+    flags.fallbackOgTitle = true;
+  } else if (general.title && og.title !== general.title) {
+    flags.titleMismatch = true;
   }
 
   if (!og.description && !twitter.description) {
@@ -32,6 +36,14 @@ export function buildPreviews(meta) {
 
   if (!og.image && twitter.image) {
     warnings.push('twitter:image presente ma og:image mancante — Facebook/LinkedIn useranno solo og:image.');
+  }
+
+  if (!twitter.card) {
+    flags.missingTwitterCard = true;
+  }
+
+  if (!twitter.image && og.image) {
+    flags.twitterFallsBackToOg = true;
   }
 
   const previews = {
@@ -58,5 +70,5 @@ export function buildPreviews(meta) {
     },
   };
 
-  return { previews, warnings };
+  return { previews, warnings, flags };
 }

@@ -1,6 +1,7 @@
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import * as cheerio from 'cheerio';
+import { parseJsonLd } from './jsonld.mjs';
 
 const USER_AGENT = 'Mozilla/5.0 (compatible; SharingDebugger/1.0; +https://github.com/pier/share)';
 
@@ -78,7 +79,7 @@ export function parseHtml(html, pageUrl) {
   const og = {};
   const twitter = {};
   const general = {};
-  const jsonld = [];
+  const { blocks: jsonld, warnings: jldWarnings } = parseJsonLd($);
 
   $('meta').each((_, el) => {
     const property = $(el).attr('property') || $(el).attr('name') || $(el).attr('itemprop') || '';
@@ -114,17 +115,10 @@ export function parseHtml(html, pageUrl) {
     } catch { }
   }
 
-  $('script[type="application/ld+json"]').each((_, el) => {
-    try {
-      const parsed = JSON.parse($(el).text());
-      jsonld.push(parsed);
-    } catch { }
-  });
-
   if (og.title == null) og.title = general.title;
 
   return {
-    meta: { og, twitter, general, jsonld, all },
+    meta: { og, twitter, general, jsonld, jldWarnings, all },
     finalUrl: pageUrl,
   };
 }

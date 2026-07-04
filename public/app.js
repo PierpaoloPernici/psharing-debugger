@@ -19,6 +19,8 @@ const results = document.getElementById('results');
 const errorSection = document.getElementById('error');
 const warningsEl = document.getElementById('warnings');
 const rawDataTbody = document.querySelector('#raw-data tbody');
+const reportBtn = document.getElementById('report-btn');
+let lastReport = null;
 
 const previewCards = {
   facebook: document.querySelector('.card-facebook'),
@@ -49,26 +51,31 @@ form.addEventListener('submit', async (e) => {
       return;
     }
 
-    renderWarnings(data.warnings || []);
-    renderSiteInfo(data.url, data.meta.general);
+    renderAlerts(data.warnings || [], data.flags || {}, data.notes || []);
+    renderSiteInfo(data.url, data.meta.general, data.jsRender);
     renderScreenshot(data.screenshotUrl);
-    renderPreviews(data.previews);
+    renderPreviews(data.previews, data.meta.general.favicon);
     renderRawData(data.meta);
+    lastReport = buildReport(data);
+    reportBtn.disabled = false;
     if (window.lucide) lucide.createIcons();
     show(results);
   } catch (err) {
+    lastReport = null;
+    reportBtn.disabled = true;
     showError('Errore di connessione al server.');
   } finally {
     hide(loading);
   }
 });
 
-function renderSiteInfo(url, general) {
+function renderSiteInfo(url, general, jsRender) {
   const el = document.getElementById('site-info');
   const faviconImg = document.getElementById('favicon-img');
   const faviconFallback = document.getElementById('favicon-fallback');
   const domain = document.getElementById('site-domain');
-  const meta = document.getElementById('site-meta');
+  const metaText = document.getElementById('site-meta-text');
+  const modeBadge = document.getElementById('mode-badge');
 
   el.classList.remove('hidden');
 
@@ -89,8 +96,17 @@ function renderSiteInfo(url, general) {
 
   const parts = [];
   if (general.title) parts.push(general.title);
-  if (jsToggle.checked) parts.push('JS rendered');
-  meta.textContent = parts.join(' · ');
+  metaText.textContent = parts.join(' · ');
+
+  if (jsRender) {
+    modeBadge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300';
+    modeBadge.textContent = 'JS rendered';
+    modeBadge.classList.remove('hidden');
+  } else {
+    modeBadge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300';
+    modeBadge.textContent = 'HTML statico';
+    modeBadge.classList.remove('hidden');
+  }
 }
 
 function renderScreenshot(screenshotUrl) {
@@ -101,10 +117,10 @@ function renderScreenshot(screenshotUrl) {
   el.classList.remove('hidden');
 }
 
-function renderPreviews(previews) {
+function renderPreviews(previews, favicon) {
   renderFacebook(previews.facebook);
   renderTwitter(previews.twitter);
-  renderLinkedin(previews.linkedin);
+  renderLinkedin(previews.linkedin, favicon);
 }
 
 function renderFacebook(fb) {
@@ -137,28 +153,86 @@ function renderTwitter(tw) {
   `;
 }
 
-function renderLinkedin(li) {
+function renderLinkedin(li, favicon) {
   const img = li.image
     ? `<div class="li-img"><img src="${escapeHtml(li.image)}" alt="" loading="lazy"></div>`
     : `<div class="li-img"><span class="text-xs text-slate-400">Nessuna immagine</span></div>`;
 
+  const faviconEl = favicon
+    ? `<img src="${escapeHtml(favicon)}" class="li-favicon" alt="" onerror="this.classList.add('hidden')">`
+    : '';
+
   previewCards.linkedin.innerHTML = `
     ${img}
     <div class="li-body">
+      <div class="li-source">${faviconEl}${escapeHtml(li.siteName || '')}</div>
       <div class="li-title">${escapeHtml(li.title) || 'Nessun titolo'}</div>
       <div class="li-desc">${escapeHtml(li.description)}</div>
-      <div class="li-domain">${escapeHtml(li.siteName)}</div>
+      <div class="li-domain">${escapeHtml(li.url || '')}</div>
     </div>
   `;
 }
 
-function renderWarnings(warnings) {
-  warningsEl.innerHTML = warnings.map((w) =>
-    `<div class="flex items-start gap-2.5 rounded-xl border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
-      <i data-lucide="triangle-alert" class="w-4 h-4 mt-0.5 shrink-0 text-amber-500"></i>
-      <span>${escapeHtml(w)}</span>
-    </div>`
-  ).join('');
+const flagMessages = {
+  fallbackOgTitle: 'og:title mancante — usato il <title> HTML come fallback',
+  titleMismatch: 'og:title e <title> HTML differiscono',
+  missingTwitterCard: 'twitter:card mancante — Twitter userà i tag Open Graph',
+  twitterFallsBackToOg: 'twitter:image mancante — Twitter userà og:image come fallback',
+};
+
+function renderAlerts(warnings, flags, notes = []) {
+  const items = [];
+
+  warnings.forEach((w) => {
+    items.push({ type: 'warning', msg: w });
+  });
+
+  Object.entries(flagMessages)
+    .filter(([key]) => flags[key])
+    .forEach(([key, msg]) => {
+      items.push({ type: 'info', msg });
+    });
+
+  notes.forEach((n) => {
+    items.push({ type: 'note', msg: n });
+  });
+
+  if (!items.length) {
+    warningsEl.innerHTML = '';
+    return;
+  }
+
+  const total = items.length;
+  const grouped = total > 3;
+
+  const alertHtml = items.map((item) => {
+    const t = item.type;
+    const colors = t === 'warning'
+      ? { border: 'border-amber-200 dark:border-amber-700', bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-800 dark:text-amber-200', icon: 'triangle-alert', iconColor: 'text-amber-500' }
+      : t === 'info'
+      ? { border: 'border-blue-200 dark:border-blue-800', bg: 'bg-blue-50 dark:bg-blue-900/20', text: 'text-blue-800 dark:text-blue-200', icon: 'info', iconColor: 'text-blue-500' }
+      : { border: 'border-slate-200 dark:border-slate-700', bg: 'bg-slate-50 dark:bg-slate-800/40', text: 'text-slate-600 dark:text-slate-400', icon: 'lightbulb', iconColor: 'text-slate-400' };
+    return `<div class="flex items-start gap-2.5 rounded-xl border ${colors.border} ${colors.bg} px-4 py-3 text-sm ${colors.text}">
+      <i data-lucide="${colors.icon}" class="w-4 h-4 mt-0.5 shrink-0 ${colors.iconColor}"></i>
+      <span>${escapeHtml(item.msg)}</span>
+    </div>`;
+  }).join('');
+
+  if (grouped) {
+    warningsEl.innerHTML = `
+      <details class="group rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden shadow-sm">
+        <summary class="flex items-center gap-2 px-5 py-3 text-sm font-semibold text-slate-600 dark:text-slate-300 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors select-none marker:content-none list-none">
+          <i data-lucide="chevron-right" class="w-4 h-4 transition-transform group-open:rotate-90 text-slate-400"></i>
+          Avvisi (${total})
+          <span class="ml-auto text-xs text-slate-400 dark:text-slate-500 font-normal">clicca per espandere</span>
+        </summary>
+        <div class="p-4 space-y-2 border-t border-slate-100 dark:border-slate-700/50">
+          ${alertHtml}
+        </div>
+      </details>`;
+  } else {
+    warningsEl.innerHTML = `<div class="space-y-2">${alertHtml}</div>`;
+  }
 }
 
 function renderRawData(meta) {
@@ -178,17 +252,216 @@ function renderRawData(meta) {
   }
 
   if (meta.jsonld && meta.jsonld.length) {
-    for (const obj of meta.jsonld) {
-      rows.push({ property: 'application/ld+json', value: JSON.stringify(obj, null, 2) });
+    for (const block of meta.jsonld) {
+      const status = block.status;
+      const typeLabel = block.type || (status === 'parse_error' ? 'parse error' : status === 'empty' ? 'empty' : 'unknown');
+      const prefix = `@${typeLabel}`;
+      const data = block.data || {};
+
+      // Non-ok blocks: just show the raw content or error
+      if (status !== 'ok') {
+        rows.push({ property: `ld+json:${typeLabel}`, value: (block.warnings || []).join(' | ') });
+        if (data._raw) rows.push({ property: `${prefix} raw`, value: data._raw });
+        continue;
+      }
+
+      const keys = Object.keys(data).filter((k) => !k.startsWith('@'));
+
+      // Context
+      if (block.context) {
+        rows.push({ property: `${prefix} @context`, value: block.context });
+      }
+
+      // Data fields
+      for (const k of keys) {
+        const v = data[k];
+        if (v == null || v === '') continue;
+        if (typeof v === 'object') {
+          rows.push({ property: `${prefix} ${k}`, value: JSON.stringify(v) });
+        } else {
+          rows.push({ property: `${prefix} ${k}`, value: String(v) });
+        }
+      }
+
+      // Empty extra fields
+      if (!block.context && !keys.length) {
+        rows.push({ property: `ld+json:${typeLabel}`, value: JSON.stringify(data) });
+      }
     }
   }
 
-  rawDataTbody.innerHTML = rows.map((r) =>
-    `<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-      <td class="px-5 py-2.5 font-mono text-indigo-600 dark:text-indigo-400 align-top break-all">${escapeHtml(r.property)}</td>
-      <td class="px-5 py-2.5 text-slate-600 dark:text-slate-400 break-all">${escapeHtml(String(r.value).slice(0, 500))}</td>
-    </tr>`
-  ).join('');
+  rawDataTbody.innerHTML = rows.map((r) => {
+    const val = String(r.value);
+    const truncated = val.length > 200;
+    const display = truncated ? val.slice(0, 200) + '…' : val;
+    return `<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+      <td class="px-5 py-2.5 font-mono text-xs text-indigo-600 dark:text-indigo-400 align-top whitespace-nowrap">${escapeHtml(r.property)}</td>
+      <td class="px-5 py-2.5 text-xs text-slate-600 dark:text-slate-400 max-w-[40ch]">
+        <div class="flex items-start gap-1 min-w-0">
+          <span class="truncate"${truncated ? ` title="${escapeHtml(val.slice(0, 300))}"` : ''}>${escapeHtml(display)}</span>
+          ${truncated ? `<button data-copy="${escapeHtml(val)}" class="shrink-0 text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 cursor-pointer leading-none" title="Copia"><i data-lucide="copy" class="w-3 h-3"></i></button>` : ''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+rawDataTbody.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-copy]');
+  if (!btn) return;
+  navigator.clipboard.writeText(btn.dataset.copy).then(() => {
+    btn.innerHTML = '<span class="text-xs text-green-600">OK</span>';
+    setTimeout(() => { btn.innerHTML = '<i data-lucide="copy" class="w-3 h-3"></i>'; }, 1500);
+  }).catch(() => {});
+});
+
+reportBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (!lastReport) return;
+  try {
+    await navigator.clipboard.writeText(lastReport);
+    reportBtn.classList.add('text-green-600', 'dark:text-green-400');
+    reportBtn.querySelector('.report-label').textContent = 'Copiato!';
+    setTimeout(() => {
+      reportBtn.classList.remove('text-green-600', 'dark:text-green-400');
+      reportBtn.querySelector('.report-label').textContent = 'Report';
+    }, 1500);
+  } catch {}
+});
+
+function buildReport(data) {
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const meta = data.meta || {};
+  const general = meta.general || {};
+  const og = meta.og || {};
+  const twitter = meta.twitter || {};
+  const jsonld = meta.jsonld || [];
+  const mode = data.jsRender ? 'JS rendered' : 'HTML statico';
+
+  let lines = [];
+
+  // Header
+  lines.push('# pCube Sharing Debugger — Report');
+  lines.push('');
+  lines.push(`**URL:** ${data.url}`);
+  if (general.canonical && general.canonical !== data.url) {
+    lines.push(`**Canonical:** ${general.canonical}`);
+  }
+  lines.push(`**Analisi:** ${mode}`);
+  lines.push(`**Data:** ${now}`);
+
+  // Alerts section
+  const warnings = data.warnings || [];
+  const flags = data.flags || {};
+  const flagMsgs = Object.entries(flagMessages)
+    .filter(([key]) => flags[key])
+    .map(([, msg]) => msg);
+  const allAlerts = [...warnings, ...flagMsgs];
+
+  const notes = data.notes || [];
+  const allNotes = [...notes];
+
+  if (allAlerts.length) {
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+    lines.push('## Avvisi');
+    lines.push('');
+    for (const msg of allAlerts) {
+      lines.push(`- ⚠ ${msg}`);
+    }
+  }
+
+  if (allNotes.length) {
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+    lines.push('## Note');
+    lines.push('');
+    for (const msg of allNotes) {
+      lines.push(`- ${msg}`);
+    }
+  }
+
+  // Metadata
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  lines.push('## Metadati');
+  lines.push('');
+
+  // General
+  const generalLines = formatMetaKV(general);
+  if (generalLines.length) {
+    lines.push('### General');
+    lines.push('');
+    lines.push(...generalLines);
+    lines.push('');
+  }
+
+  // Open Graph
+  const ogLines = formatMetaKV(og, 'og:');
+  if (ogLines.length) {
+    lines.push('### Open Graph');
+    lines.push('');
+    lines.push(...ogLines);
+    lines.push('');
+  }
+
+  // Twitter
+  const twitterLines = formatMetaKV(twitter, 'twitter:');
+  if (twitterLines.length) {
+    lines.push('### Twitter');
+    lines.push('');
+    lines.push(...twitterLines);
+    lines.push('');
+  }
+
+  // JSON-LD
+  if (jsonld.length) {
+    lines.push('### JSON-LD');
+    lines.push('');
+    for (const block of jsonld) {
+      const t = block.type || (block.status === 'parse_error' ? 'parse error' : block.status === 'empty' ? 'empty' : 'unknown');
+      const statusTag = block.status === 'ok' ? '' : ` [${block.status}]`;
+      lines.push(`#### ${t}${statusTag}`);
+      lines.push('');
+      if (block.context) lines.push(`- @context: ${block.context}`);
+      for (const w of (block.warnings || [])) lines.push(`- ⚠ ${w}`);
+
+      if (block.status === 'ok') {
+        const keys = Object.keys(block.data || {}).filter((k) => !k.startsWith('@'));
+        for (const k of keys) {
+          const v = block.data[k];
+          const val = smartTruncate(v, 120);
+          lines.push(`- ${k}: ${val}`);
+        }
+      } else if (block.data._raw) {
+        lines.push(`- raw: ${block.data._raw}`);
+      }
+      lines.push('');
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function smartTruncate(v, max) {
+  if (typeof v === 'object' && v !== null) {
+    if (Array.isArray(v)) return `[...${v.length} items]`;
+    const keys = Object.keys(v).slice(0, 6);
+    const more = Object.keys(v).length > 6 ? ', …' : '';
+    return `{${keys.join(', ')}${more}}`;
+  }
+  const s = String(v);
+  return s.length > max ? s.slice(0, max) + '…' : s;
+}
+
+function formatMetaKV(obj, prefix = '') {
+  if (!obj) return [];
+  return Object.entries(obj)
+    .filter(([, v]) => v != null && v !== '')
+    .map(([k, v]) => `- ${prefix}${k}: ${v}`);
 }
 
 function showError(msg) {
