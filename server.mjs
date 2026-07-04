@@ -39,7 +39,8 @@ function logRequest(req, res, next) {
   const clientIp = getClientIp(req);
   res.on('finish', () => {
     const duration = Date.now() - start;
-    const line = `[${new Date().toISOString()}] ${clientIp} ${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms\n`;
+    const targetUrl = req.body?.url || '-';
+    const line = `[${new Date().toISOString()}] ${clientIp} ${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms ${targetUrl}\n`;
     fs.appendFile(logFile, line, (err) => {
       if (err) console.error('Errore scrittura log:', err.message);
     });
@@ -47,10 +48,12 @@ function logRequest(req, res, next) {
   next();
 }
 
+// express.json() prima del logger così req.body è popolato per POST
+app.use(express.json());
+
 app.use(logRequest);
 // ---
 
-app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.post('/api/debug', async (req, res) => {
