@@ -144,11 +144,11 @@ function validateDeprecated(data, findings) {
 
 // ── Block builder ──────────────────
 
-function buildBlock(data, parentContext) {
+function buildBlock(data) {
   const types = data['@type'];
   const primaryType = Array.isArray(types) ? types[0] : (types || null);
-  const ctx = data['@context'] || parentContext;
-  const ctxValid = isValidContext(ctx);
+  const ctx = data['@context'] || null;
+  const ctxValid = Boolean(ctx && isValidContext(ctx));
   const localFindings = [];
 
   let status = 'ok';
@@ -158,7 +158,9 @@ function buildBlock(data, parentContext) {
     localFindings.push(ERR('JSONLD_TYPE_MISSING', 'Blocco JSON-LD senza @type — sarà ignorato da Google', 'ld+json'));
   } else if (!ctxValid && ctx) {
     status = 'unknown_context';
-    localFindings.push(WARN('JSONLD_CONTEXT_NOT_SCHEMAORG', `${primaryType}: @context="${ctx}" non riconducibile a schema.org`, `ld+json:${primaryType}`));
+    localFindings.push(WARN('JSONLD_CONTEXT_NOT_SCHEMAORG', `${primaryType}: @context="${ctx}" non riconducibile a schema.org`, `ld+json`));
+  } else if (ctx && typeof ctx === 'string' && /^http:\/\/schema\.org/i.test(ctx)) {
+    localFindings.push(WARN('JSONLD_CONTEXT_NOT_SCHEMAORG', `${primaryType}: @context usa http://schema.org invece di https://schema.org — normalizzare a https`, `ld+json`));
   }
 
   if (status === 'ok' && primaryType) {
@@ -193,6 +195,33 @@ function buildBlock(data, parentContext) {
   };
 }
 
+// ── Node normalizer ────────────────
+
+/**
+ * Parse a JSON-LD block into a flat list of leaf nodes.
+ * Handles: single object, @graph wrapper, root-level arrays.
+ */
+function normalizeNodes(parsed, inheritedCtx = null) {
+  if (Array.isArray(parsed)) {
+    const result = [];
+    for (const item of parsed) {
+      result.push(...normalizeNodes(item, inheritedCtx));
+    }
+    return result;
+  }
+  if (parsed && typeof parsed === 'object' && Array.isArray(parsed['@graph'])) {
+    const graphCtx = parsed['@context'] || inheritedCtx;
+    return parsed['@graph'].flatMap((child) => normalizeNodes(child, graphCtx));
+  }
+  if (parsed && typeof parsed === 'object') {
+    if (inheritedCtx && !parsed['@context']) {
+      parsed = { ...parsed, '@context': inheritedCtx };
+    }
+    return [parsed];
+  }
+  return [];
+}
+
 // ── Extraction ─────────────────────
 
 export function parseJsonLd($) {
@@ -201,19 +230,21 @@ export function parseJsonLd($) {
 
   $('script[type="application/ld+json"]').each((_, el) => {
     const raw = ($(el).text() || '').trim();
+    const scriptIdx = blocks.length;
     if (!raw) {
       blocks.push({ type: null, typeAll: [], status: 'empty', context: null, contextValid: false, data: { _raw: '' } });
-      findings.push(INFO('JSONLD_PARSE_ERROR', 'Blocco JSON-LD vuoto — presente ma senza contenuto', `script[${blocks.length}]`));
+      findings.push(INFO('JSONLD_PARSE_ERROR', 'Blocco JSON-LD vuoto — presente ma senza contenuto', `script[${scriptIdx}]`));
       return;
     }
     try {
       const parsed = JSON.parse(raw);
-      const graph = parsed['@graph'];
-      const items = Array.isArray(graph) ? graph : [parsed];
-      for (const item of items) {
-        const block = buildBlock(item, Array.isArray(graph) ? (parsed['@context'] || null) : null);
+      const nodes = normalizeNodes(parsed);
+      for (let ni = 0; ni < nodes.length; ni++) {
+        const node = nodes[ni];
+        const nodeIdx = nodes.length === 1 ? null : ni;
+        const block = buildBlock(node);
+        block._prefix = nodeIdx != null ? `ld+json[${scriptIdx}][${nodeIdx}]` : `ld+json[${scriptIdx}]`;
         blocks.push(block);
-        findings.push(...block.localFindings);
       }
     } catch (e) {
       blocks.push({ type: null, typeAll: [], status: 'parse_error', context: null, contextValid: false, data: { _raw: raw.slice(0, 300) } });
@@ -221,24 +252,41 @@ export function parseJsonLd($) {
     }
   });
 
-  // Post-processing: detect duplicate @type
-  const typeCount = {};
+  // Emit block findings with indexed field paths
   for (const b of blocks) {
-    if (b.type) typeCount[b.type] = (typeCount[b.type] || 0) + 1;
-  }
-  for (const [t, c] of Object.entries(typeCount)) {
-    if (c > 1) {
-      findings.push(WARN('JSONLD_DUPLICATE_TYPE', `@type "${t}" dichiarato ${c}× in blocchi diversi — possibile conflitto tra plugin/generatori`, `ld+json:${t}`));
+    for (const f of (b.localFindings || [])) {
+      if (f.field) {
+        f.field = f.field.replace(/^ld\+json[^ .]*/, b._prefix);
+      }
+      findings.push(f);
     }
+    delete b.localFindings;
+    delete b._prefix;
+  }
+
+  // Post-processing: detect duplicate @type with incompatible structure
+  const byType = {};
+  for (const b of blocks) {
+    if (!b.type) continue;
+    if (!byType[b.type]) byType[b.type] = [];
+    byType[b.type].push(b);
+  }
+  for (const [t, instances] of Object.entries(byType)) {
+    if (instances.length < 2) continue;
+    // Check structural compatibility between first two instances
+    const a = instances[0].data, bd = instances[1].data;
+    const aKeys = Object.keys(a).filter(k => !k.startsWith('@')).sort().join(',');
+    const bKeys = Object.keys(bd).filter(k => !k.startsWith('@')).sort().join(',');
+    const details = aKeys !== bKeys ? ` (struttura diversa: keys differiscono)` : ` (dichiarato ${instances.length}×)`;
+    findings.push(WARN('JSONLD_DUPLICATE_TYPE',
+      `@type "${t}" presente ${instances.length}× in pagina${details} — possibile conflitto tra plugin/generatori`,
+      `ld+json:${t}`));
   }
 
   // No JSON-LD at all
   if (!blocks.length) {
     findings.push(INFO('JSONLD_MISSING', 'Nessun blocco JSON-LD trovato in pagina — Google structured data non presente', 'script[type="application/ld+json"]'));
   }
-
-  // Strip internal fields from blocks before returning
-  for (const b of blocks) delete b.localFindings;
 
   return { blocks, findings };
 }
