@@ -156,10 +156,13 @@ function buildBlock(data) {
   if (!primaryType) {
     status = 'no_type';
     localFindings.push(ERR('JSONLD_TYPE_MISSING', 'Blocco JSON-LD senza @type — sarà ignorato da Google', 'ld+json'));
-  } else if (!ctxValid && ctx) {
+  } else if (!ctx) {
+    status = 'unknown_context';
+    localFindings.push(WARN('JSONLD_CONTEXT_MISSING', `${primaryType}: @context assente — i crawler potrebbero non interpretarlo correttamente`, `ld+json`));
+  } else if (!ctxValid) {
     status = 'unknown_context';
     localFindings.push(WARN('JSONLD_CONTEXT_NOT_SCHEMAORG', `${primaryType}: @context="${ctx}" non riconducibile a schema.org`, `ld+json`));
-  } else if (ctx && typeof ctx === 'string' && /^http:\/\/schema\.org/i.test(ctx)) {
+  } else if (typeof ctx === 'string' && /^http:\/\/schema\.org/i.test(ctx)) {
     localFindings.push(WARN('JSONLD_CONTEXT_NOT_SCHEMAORG', `${primaryType}: @context usa http://schema.org invece di https://schema.org — normalizzare a https`, `ld+json`));
   }
 

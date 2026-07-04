@@ -140,6 +140,7 @@ The full taxonomy is defined in the project's `findings.mjs` and `opengraph.mjs`
 | JSONLD | `JSONLD_REQUIRED_FIELD_MISSING` | ERROR | Missing required field for type |
 | JSONLD | `JSONLD_DUPLICATE_TYPE` | WARNING | Same `@type` appears multiple times with incompatible structure |
 | JSONLD | `JSONLD_CONTEXT_NOT_SCHEMAORG` | WARNING | `@context` not schema.org (or uses `http://` instead of `https://`) |
+| JSONLD | `JSONLD_CONTEXT_MISSING` | WARNING | Node has `@type` but no `@context` declared |
 
 ## Notes
 
