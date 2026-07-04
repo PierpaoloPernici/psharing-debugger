@@ -31,9 +31,21 @@ app.post('/api/debug', async (req, res) => {
   }
 
   try {
-    const result = jsRender
-      ? await scrapeWithBrowser(parsedUrl.href)
-      : await scrape(parsedUrl.href);
+    let result;
+    if (jsRender) {
+      result = await scrapeWithBrowser(parsedUrl.href);
+    } else {
+      try {
+        result = await scrape(parsedUrl.href);
+      } catch (err) {
+        if (err.httpStatus && err.httpStatus >= 400 && err.httpStatus < 500) {
+          // HTTP 4xx — site likely blocks bots; fallback to headless browser
+          result = await scrapeWithBrowser(parsedUrl.href);
+        } else {
+          throw err;
+        }
+      }
+    }
 
     const { previews } = buildPreviews(result.meta);
     const og = validateOpenGraph(result.meta);

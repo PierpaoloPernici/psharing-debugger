@@ -78,7 +78,7 @@ export async function scrapeWithBrowser(url) {
     await page.setViewport({ width: 1200, height: 630 });
 
     // Best-effort: click accept/reject buttons then strip any leftovers
-    await dismissCookieBanners(page);
+    await dismissCookieBanners(page).catch(() => {});
     await new Promise((r) => setTimeout(r, 600));
 
     const screenshot = await page.screenshot({ type: 'jpeg', quality: 70 });
