@@ -24,7 +24,7 @@ function fetchUrl(url, ua = USER_AGENT, maxRedirects = 5) {
           'Accept-Language': 'en-US,en;q=0.9',
         },
         timeout: 15000,
-        rejectUnauthorized: false,
+        rejectUnauthorized: process.env.NODE_ENV === 'production',
       };
 
       const req = mod(opts, (res) => {

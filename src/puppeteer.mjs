@@ -1,8 +1,11 @@
 import { parseHtml } from './scraper.mjs';
 
 let puppeteer;
+let browser;
 
-export async function scrapeWithBrowser(url) {
+async function getBrowser() {
+  if (browser) return browser;
+
   if (!puppeteer) {
     try {
       puppeteer = (await import('puppeteer')).default;
@@ -13,14 +16,20 @@ export async function scrapeWithBrowser(url) {
     }
   }
 
-  const browser = await puppeteer.launch({
+  browser = await puppeteer.launch({
     headless: true,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });
 
+  return browser;
+}
+
+export async function scrapeWithBrowser(url) {
+  const b = await getBrowser();
+
+  const page = await b.newPage();
   try {
-    const page = await browser.newPage();
     await page.setUserAgent(
       'Mozilla/5.0 (compatible; SharingDebugger/1.0; +https://github.com/pier/share)'
     );
@@ -36,6 +45,13 @@ export async function scrapeWithBrowser(url) {
 
     return { ...parseHtml(html, finalUrl), jsRender: true, screenshotUrl };
   } finally {
+    await page.close();
+  }
+}
+
+export async function closeBrowser() {
+  if (browser) {
     await browser.close();
+    browser = null;
   }
 }

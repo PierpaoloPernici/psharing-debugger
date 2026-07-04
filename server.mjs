@@ -2,7 +2,7 @@ import express from 'express';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { scrape } from './src/scraper.mjs';
-import { scrapeWithBrowser } from './src/puppeteer.mjs';
+import { scrapeWithBrowser, closeBrowser } from './src/puppeteer.mjs';
 import { buildPreviews } from './src/previews.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,6 +47,9 @@ app.post('/api/debug', async (req, res) => {
     res.status(502).json({ error: `Errore nel recupero della pagina: ${err.message}` });
   }
 });
+
+process.on('SIGINT', async () => { await closeBrowser(); process.exit(0); });
+process.on('SIGTERM', async () => { await closeBrowser(); process.exit(0); });
 
 app.listen(PORT, HOST, () => {
   const address = `http://${HOST}:${PORT}`;

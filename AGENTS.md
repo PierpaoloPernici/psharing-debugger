@@ -37,3 +37,4 @@ Strumento locale per vedere come un URL appare quando condiviso su social networ
 - L'immagine `og:image` di default deve essere ≥ 200×200 px; per risultati ottimali ≥ 600 px di larghezza
 - `og:image` è l'unico tag immagine che Facebook/LinkedIn usano; `twitter:image` è solo per Twitter/X
 - Se `og:title` manca, il fallback è il `<title>` HTML
+
