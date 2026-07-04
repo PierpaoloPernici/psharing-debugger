@@ -82,19 +82,19 @@ function fetchUrl(url, ua = USER_AGENT, maxRedirects = 5) {
   });
 }
 
-export async function scrape(url, ua) {
+export async function scrape(url, ua, enableJsonLd = false) {
   const { body, finalUrl } = await fetchUrl(url, ua);
-  return { ...parseHtml(body, finalUrl), jsRender: false };
+  return { ...parseHtml(body, finalUrl, enableJsonLd), jsRender: false };
 }
 
-export function parseHtml(html, pageUrl) {
+export function parseHtml(html, pageUrl, enableJsonLd = false) {
   const $ = cheerio.load(html);
 
   const all = [];
   const og = {};
   const twitter = {};
   const general = {};
-  const { blocks: jsonld, findings: jldFindings } = parseJsonLd($);
+  const { blocks: jsonld, findings: jldFindings } = enableJsonLd ? parseJsonLd($) : { blocks: [], findings: [] };
 
   $('meta').each((_, el) => {
     const property = $(el).attr('property') || $(el).attr('name') || $(el).attr('itemprop') || '';

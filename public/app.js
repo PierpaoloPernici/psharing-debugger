@@ -2,6 +2,7 @@ const form = document.getElementById('debug-form');
 const urlInput = document.getElementById('url-input');
 const pasteBtn = document.getElementById('paste-btn');
 const jsToggle = document.getElementById('js-toggle');
+const jsonldToggle = document.getElementById('jsonld-toggle');
 
 pasteBtn.addEventListener('click', async () => {
   try {
@@ -41,7 +42,7 @@ form.addEventListener('submit', async (e) => {
     const res = await fetch('/api/debug', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, jsRender: jsToggle.checked }),
+      body: JSON.stringify({ url, jsRender: jsToggle.checked, enableJsonLd: jsonldToggle.checked }),
     });
 
     const data = await res.json();

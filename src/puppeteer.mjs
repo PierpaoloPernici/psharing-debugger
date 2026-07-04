@@ -51,7 +51,7 @@ const ACCEPT_TEXTS = [
   'godkänn', 'godkänn alla',
 ];
 
-export async function scrapeWithBrowser(url) {
+export async function scrapeWithBrowser(url, enableJsonLd = false) {
   const b = await getBrowser();
 
   const page = await b.newPage();
@@ -87,7 +87,7 @@ export async function scrapeWithBrowser(url) {
     const html = await page.content();
     const finalUrl = page.url();
 
-    return { ...parseHtml(html, finalUrl), jsRender: true, screenshotUrl };
+    return { ...parseHtml(html, finalUrl, enableJsonLd), jsRender: true, screenshotUrl };
   } finally {
     await page.close();
   }

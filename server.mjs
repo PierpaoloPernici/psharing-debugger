@@ -16,7 +16,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.post('/api/debug', async (req, res) => {
-  const { url, jsRender = false } = req.body || {};
+  const { url, jsRender = false, enableJsonLd = false } = req.body || {};
 
   if (!url) {
     return res.status(400).json({ error: 'URL richiesta' });
@@ -33,14 +33,13 @@ app.post('/api/debug', async (req, res) => {
   try {
     let result;
     if (jsRender) {
-      result = await scrapeWithBrowser(parsedUrl.href);
+      result = await scrapeWithBrowser(parsedUrl.href, enableJsonLd);
     } else {
       try {
-        result = await scrape(parsedUrl.href);
+        result = await scrape(parsedUrl.href, undefined, enableJsonLd);
       } catch (err) {
         if (err.httpStatus && err.httpStatus >= 400 && err.httpStatus < 500) {
-          // HTTP 4xx — site likely blocks bots; fallback to headless browser
-          result = await scrapeWithBrowser(parsedUrl.href);
+          result = await scrapeWithBrowser(parsedUrl.href, enableJsonLd);
         } else {
           throw err;
         }
