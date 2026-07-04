@@ -24,8 +24,6 @@ const SCHEMA_CONTEXTS = [
 
 const DEPRECATED_TYPES = ['DataCatalog', 'DataDownload'];
 
-const UNRECOGNIZED_INFO_THRESHOLD = 20; // above this, skip per-field checks
-
 function isAbsoluteUrl(s) { return /^https?:\/\//i.test(String(s || '')); }
 function isISO8601(s) { return /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2})/.test(String(s || '')); }
 
@@ -39,15 +37,10 @@ function isValidContext(ctx) {
 
 // ── Finding helpers ────────────────
 
-function f(severity, code, msg, field) {
-  return { severity, category: Category.JSONLD, code, message: msg, field };
-}
-
-const ERR = (code, msg, field) => f(Severity.ERROR, code, msg, field);
-const WARN = (code, msg, field) => f(Severity.WARNING, code, msg, field);
-const INFO = (code, msg, field) => f(Severity.INFO, code, msg, field);
-
-function jpfx(type, sub) { return sub ? `ld+json:${type}.${sub}` : `ld+json:${type}`; }
+const ERR = (code, msg, field) => ({ severity: Severity.ERROR, category: Category.JSONLD, code, message: msg, field });
+const WARN = (code, msg, field) => ({ severity: Severity.WARNING, category: Category.JSONLD, code, message: msg, field });
+const INFO = (code, msg, field) => ({ severity: Severity.INFO, category: Category.JSONLD, code, message: msg, field });
+const jpfx = (type, sub) => sub ? `ld+json:${type}.${sub}` : `ld+json:${type}`;
 
 // ── Semantic validators ────────────
 
@@ -151,22 +144,21 @@ function validateDeprecated(data, findings) {
 
 // ── Block builder ──────────────────
 
-function buildBlock(data, parentContext, findings, blockIdx) {
+function buildBlock(data, parentContext) {
   const types = data['@type'];
   const primaryType = Array.isArray(types) ? types[0] : (types || null);
-  const { valid: ctxValid, context } = (() => {
-    const ctx = data['@context'] || parentContext;
-    return { valid: isValidContext(ctx), context: ctx || null };
-  })();
+  const ctx = data['@context'] || parentContext;
+  const ctxValid = isValidContext(ctx);
+  const localFindings = [];
 
   let status = 'ok';
 
   if (!primaryType) {
     status = 'no_type';
-    findings.push(ERR('JSONLD_TYPE_MISSING', `Blocco JSON-LD senza @type — sarà ignorato da Google`, `ld+json[${blockIdx}]`));
-  } else if (!ctxValid && context) {
+    localFindings.push(ERR('JSONLD_TYPE_MISSING', 'Blocco JSON-LD senza @type — sarà ignorato da Google', 'ld+json'));
+  } else if (!ctxValid && ctx) {
     status = 'unknown_context';
-    findings.push(WARN('JSONLD_CONTEXT_NOT_SCHEMAORG', `${primaryType}: @context="${context}" non riconducibile a schema.org`, `ld+json:${primaryType}[${blockIdx}]`));
+    localFindings.push(WARN('JSONLD_CONTEXT_NOT_SCHEMAORG', `${primaryType}: @context="${ctx}" non riconducibile a schema.org`, `ld+json:${primaryType}`));
   }
 
   if (status === 'ok' && primaryType) {
@@ -174,17 +166,17 @@ function buildBlock(data, parentContext, findings, blockIdx) {
     if (req) {
       for (const field of req) {
         if (data[field] == null || data[field] === '')
-          findings.push(ERR('JSONLD_REQUIRED_FIELD_MISSING', `${primaryType}: campo obbligatorio "${field}" assente`, jpfx(primaryType, field)));
+          localFindings.push(ERR('JSONLD_REQUIRED_FIELD_MISSING', `${primaryType}: campo obbligatorio "${field}" assente`, jpfx(primaryType, field)));
       }
     } else {
-      findings.push(INFO('JSONLD_TYPE_UNRECOGNIZED', `${primaryType}: tipo non mappato dal validatore (nessuna validazione extra eseguita)`, `ld+json:${primaryType}[${blockIdx}]`));
+      localFindings.push(INFO('JSONLD_TYPE_UNRECOGNIZED', `${primaryType}: tipo non mappato dal validatore (nessuna validazione extra eseguita)`, `ld+json:${primaryType}`));
     }
-    validateUrls(data, primaryType, findings);
-    validateDates(data, primaryType, findings);
-    validateOrganization(data, primaryType, findings);
-    validateBreadcrumb(data, primaryType, findings);
-    validateImage(data, primaryType, findings);
-    validateDeprecated(data, findings);
+    validateUrls(data, primaryType, localFindings);
+    validateDates(data, primaryType, localFindings);
+    validateOrganization(data, primaryType, localFindings);
+    validateBreadcrumb(data, primaryType, localFindings);
+    validateImage(data, primaryType, localFindings);
+    validateDeprecated(data, localFindings);
   }
 
   const clean = {};
@@ -194,9 +186,10 @@ function buildBlock(data, parentContext, findings, blockIdx) {
     type: primaryType,
     typeAll: Array.isArray(types) ? types : [types].filter(Boolean),
     status,
-    context,
+    context: ctx || null,
     contextValid: ctxValid,
     data: clean,
+    localFindings,
   };
 }
 
@@ -210,17 +203,18 @@ export function parseJsonLd($) {
     const raw = ($(el).text() || '').trim();
     if (!raw) {
       blocks.push({ type: null, typeAll: [], status: 'empty', context: null, contextValid: false, data: { _raw: '' } });
-      findings.push(INFO('JSONLD_PARSE_ERROR', `Blocco JSON-LD vuoto — presente ma senza contenuto`, `script[${blocks.length}]`));
+      findings.push(INFO('JSONLD_PARSE_ERROR', 'Blocco JSON-LD vuoto — presente ma senza contenuto', `script[${blocks.length}]`));
       return;
     }
     try {
       const parsed = JSON.parse(raw);
-      const flattened = flattenGraph(parsed, findings);
-      const startIdx = blocks.length;
-      flattened.forEach((b, i) => {
-        b._blockIdx = startIdx + i;
-        blocks.push(b);
-      });
+      const graph = parsed['@graph'];
+      const items = Array.isArray(graph) ? graph : [parsed];
+      for (const item of items) {
+        const block = buildBlock(item, Array.isArray(graph) ? (parsed['@context'] || null) : null);
+        blocks.push(block);
+        findings.push(...block.localFindings);
+      }
     } catch (e) {
       blocks.push({ type: null, typeAll: [], status: 'parse_error', context: null, contextValid: false, data: { _raw: raw.slice(0, 300) } });
       findings.push(ERR('JSONLD_PARSE_ERROR', `Errore di parsing JSON: ${e.message}`, `script[${blocks.length}]`));
@@ -234,20 +228,17 @@ export function parseJsonLd($) {
   }
   for (const [t, c] of Object.entries(typeCount)) {
     if (c > 1) {
-      const first = blocks.find(b => b.type === t && b._blockIdx != null);
-      if (first) {
-        findings.push(WARN('JSONLD_DUPLICATE_TYPE', `@type "${t}" dichiarato ${c}× in blocchi diversi — possibile conflitto tra plugin/generatori`, `ld+json:${t}`));
-      }
+      findings.push(WARN('JSONLD_DUPLICATE_TYPE', `@type "${t}" dichiarato ${c}× in blocchi diversi — possibile conflitto tra plugin/generatori`, `ld+json:${t}`));
     }
   }
 
-  return { blocks, findings };
-}
-
-function flattenGraph(data, findings) {
-  const graph = data['@graph'];
-  if (Array.isArray(graph)) {
-    return graph.map((item) => buildBlock(item, data['@context'] || null, findings, -1));
+  // No JSON-LD at all
+  if (!blocks.length) {
+    findings.push(INFO('JSONLD_MISSING', 'Nessun blocco JSON-LD trovato in pagina — Google structured data non presente', 'script[type="application/ld+json"]'));
   }
-  return [buildBlock(data, null, findings, -1)];
+
+  // Strip internal fields from blocks before returning
+  for (const b of blocks) delete b.localFindings;
+
+  return { blocks, findings };
 }

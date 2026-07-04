@@ -8,8 +8,12 @@ function f(severity, code, msg, field) {
   return { severity, category: Category.OG, code, message: msg, field };
 }
 
-function fi(severity, code, msg, field) {
-  return { severity, category: Category.OG, code, message: msg, field };
+function tw(severity, code, msg, field) {
+  return { severity, category: Category.TWITTER, code, message: msg, field };
+}
+
+function g(severity, code, msg, field) {
+  return { severity, category: Category.GENERAL, code, message: msg, field };
 }
 
 /**
@@ -79,7 +83,7 @@ export function validateOpenGraph(meta) {
   // ── Content coherence ───────────────────────────
 
   if (og.title && general.title && og.title !== general.title) {
-    findings.push(fi(Severity.INFO, 'TITLE_OG_TITLE_MISMATCH',
+    findings.push(g(Severity.INFO, 'TITLE_OG_TITLE_MISMATCH',
       '<title> e og:title differiscono — intenzionale? Verificare la coerenza', 'title'));
   }
 
@@ -129,21 +133,21 @@ export function validateOpenGraph(meta) {
   // ── Twitter tags ────────────────────────────────
 
   if (!twitter.title) {
-    findings.push(f(Severity.INFO, 'TWITTER_TITLE_MISSING', 'twitter:title assente — Twitter userà og:title come fallback'));
+    findings.push(tw(Severity.INFO, 'TWITTER_TITLE_MISSING', 'twitter:title assente — Twitter userà og:title come fallback'));
   }
   if (!twitter.card) {
-    findings.push(f(Severity.WARNING, 'TWITTER_CARD_MISSING', 'twitter:card assente — Twitter userà i tag Open Graph come fallback'));
+    findings.push(tw(Severity.WARNING, 'TWITTER_CARD_MISSING', 'twitter:card assente — Twitter userà i tag Open Graph come fallback'));
   }
   if (!twitter.image && og.image) {
-    findings.push(f(Severity.INFO, 'TWITTER_IMAGE_MISSING', 'twitter:image assente — Twitter userà og:image come fallback'));
+    findings.push(tw(Severity.INFO, 'TWITTER_IMAGE_MISSING', 'twitter:image assente — Twitter userà og:image come fallback'));
   } else if (og.image && twitter.image && og.image !== twitter.image) {
-    findings.push(f(Severity.INFO, 'TWITTER_IMAGE_MISSING', 'twitter:image e og:image puntano a URL diversi — verificare la coerenza', 'twitter:image'));
+    findings.push(tw(Severity.INFO, 'TWITTER_IMAGE_MISSING', 'twitter:image e og:image puntano a URL diversi — verificare la coerenza', 'twitter:image'));
   }
   if (og.image && !twitter.image) {
     const iw = parseInt(og['image:width'], 10) || 0;
     const ih = parseInt(og['image:height'], 10) || 0;
     if (iw > 0 && (iw < 300 || ih < 157)) {
-      findings.push(f(Severity.WARNING, 'TWITTER_IMAGE_BELOW_MINIMUM',
+      findings.push(tw(Severity.WARNING, 'TWITTER_IMAGE_BELOW_MINIMUM',
         `og:image (usata da Twitter come fallback) è ${iw}×${ih}px — sotto il minimo 300×157 per summary_large_image`));
     }
   }

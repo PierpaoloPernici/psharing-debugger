@@ -231,12 +231,11 @@ function renderRawData(meta) {
   if (meta.jsonld && meta.jsonld.length) {
     for (const block of meta.jsonld) {
       const status = block.status;
-      const typeLabel = block.type || (status === 'parse_error' ? 'parse error' : status === 'empty' ? 'empty' : 'unknown');
+      const typeLabel = block.type || (status === 'parse_error' ? 'parse error' : status === 'empty' ? 'empty' : 'no type');
       const prefix = `@${typeLabel}`;
       const data = block.data || {};
 
-      // Non-ok blocks: just show the raw content
-      if (status !== 'ok') {
+      if (status === 'parse_error' || status === 'empty') {
         rows.push({ property: `ld+json:${typeLabel} [${status}]`, value: data._raw || status });
         continue;
       }
@@ -248,7 +247,7 @@ function renderRawData(meta) {
         rows.push({ property: `${prefix} @context`, value: block.context });
       }
 
-      // Data fields
+      // Data fields (for no_type blocks: dump all keys even without type)
       for (const k of keys) {
         const v = data[k];
         if (v == null || v === '') continue;
@@ -259,7 +258,7 @@ function renderRawData(meta) {
         }
       }
 
-      // Empty extra fields
+      // Empty — fallback dump
       if (!block.context && !keys.length) {
         rows.push({ property: `ld+json:${typeLabel}`, value: JSON.stringify(data) });
       }

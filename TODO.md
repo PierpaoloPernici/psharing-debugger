@@ -18,11 +18,12 @@
 - [x] User-agent browser reale per Puppeteer
 - [x] Page load: `domcontentloaded` + delay instead of `networkidle2`
 - [x] Findings pipeline: severity taxonomy (error/warning/info), unified `findings[]` in API response
+- [x] Findings: TWITTER category separated from OG, GENERAL category for cross-checks
+- [x] Findings: no [-1] indices in fields, blockIdx removed from find generation
+- [x] Findings: no_type blocks show raw data keys in metadata table, not just status label
 - [x] OG: modulo dedicato (src/opengraph.mjs) con validazione tag obbligatori, immagine, coerenza
 - [x] OG: image HEAD request (reachability, size, content-type) + icon/favicon heuristic
 - [x] OG: og:url vs canonical cross-check
-- [x] Twitter findings (TWITTER_CARD_MISSING, TWITTER_IMAGE_MISSING, TWITTER_TITLE_MISSING)
 - [x] JSON-LD: modulo dedicato (src/jsonld.mjs) con validazione tipi, URL, date, BreadcrumbList
 - [x] JSON-LD: flatten `@graph`, detection duplicati, tipi deprecati, organizzazione, immagini
 - [x] JSON-LD: all findings in joint pipeline, no inline warnings in blocks
-- [x] Report: unified findings section (ERROR→WARNING→INFO), structured JSON-LD key listing
