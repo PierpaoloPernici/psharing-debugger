@@ -79,7 +79,7 @@ export function parseHtml(html, pageUrl) {
   const og = {};
   const twitter = {};
   const general = {};
-  const { blocks: jsonld, warnings: jldWarnings } = parseJsonLd($);
+  const { blocks: jsonld, findings: jldFindings } = parseJsonLd($);
 
   $('meta').each((_, el) => {
     const property = $(el).attr('property') || $(el).attr('name') || $(el).attr('itemprop') || '';
@@ -118,7 +118,7 @@ export function parseHtml(html, pageUrl) {
   if (og.title == null) og.title = general.title;
 
   return {
-    meta: { og, twitter, general, jsonld, jldWarnings, all },
+    meta: { og, twitter, general, jsonld, jldFindings, all },
     finalUrl: pageUrl,
   };
 }

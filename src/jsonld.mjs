@@ -1,7 +1,4 @@
-/**
- * JSON-LD extraction and validation.
- * Accepts a cheerio instance ($) and returns structured, typed, validated blocks.
- */
+import { Severity, Category } from './findings.mjs';
 
 const REQUIRED = {
   WebSite: ['url'],
@@ -21,214 +18,177 @@ const REQUIRED = {
 };
 
 const SCHEMA_CONTEXTS = [
-  'https://schema.org',
-  'http://schema.org',
-  'https://schema.org/',
-  'http://schema.org/',
+  'https://schema.org', 'http://schema.org',
+  'https://schema.org/', 'http://schema.org/',
 ];
 
 const DEPRECATED_TYPES = ['DataCatalog', 'DataDownload'];
 
-function isAbsoluteUrl(s) {
-  if (!s || typeof s !== 'string') return false;
-  return /^https?:\/\//i.test(s);
-}
+const UNRECOGNIZED_INFO_THRESHOLD = 20; // above this, skip per-field checks
 
-function isISO8601(s) {
-  if (!s || typeof s !== 'string') return false;
-  return /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2})/.test(s);
-}
+function isAbsoluteUrl(s) { return /^https?:\/\//i.test(String(s || '')); }
+function isISO8601(s) { return /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2})/.test(String(s || '')); }
 
 function isValidContext(ctx) {
   if (!ctx) return false;
-  if (typeof ctx === 'string') {
-    return SCHEMA_CONTEXTS.some((base) => ctx.startsWith(base));
-  }
-  if (Array.isArray(ctx)) {
-    return ctx.some((c) => typeof c === 'string' && SCHEMA_CONTEXTS.some((base) => c.startsWith(base)));
-  }
-  if (typeof ctx === 'object') {
-    return Object.values(ctx).some((v) => typeof v === 'string' && SCHEMA_CONTEXTS.some((base) => v.startsWith(base)));
-  }
+  if (typeof ctx === 'string') return SCHEMA_CONTEXTS.some((b) => ctx.startsWith(b));
+  if (Array.isArray(ctx)) return ctx.some((c) => typeof c === 'string' && SCHEMA_CONTEXTS.some((b) => c.startsWith(b)));
+  if (typeof ctx === 'object') return Object.values(ctx).some((v) => typeof v === 'string' && SCHEMA_CONTEXTS.some((b) => v.startsWith(b)));
   return false;
 }
 
-function validateContext(data, parentContext) {
-  const ctx = data['@context'] || parentContext;
-  const valid = isValidContext(ctx);
-  return { valid, context: ctx || null };
+// ── Finding helpers ────────────────
+
+function f(severity, code, msg, field) {
+  return { severity, category: Category.JSONLD, code, message: msg, field };
 }
 
-function validateRequired(type, data) {
-  const warnings = [];
-  if (!type) return warnings;
-  const req = REQUIRED[type];
-  if (!req) return warnings;
-  for (const field of req) {
-    if (data[field] == null || data[field] === '') {
-      warnings.push(`${type}: missing required field "${field}"`);
-    }
-  }
-  return warnings;
-}
+const ERR = (code, msg, field) => f(Severity.ERROR, code, msg, field);
+const WARN = (code, msg, field) => f(Severity.WARNING, code, msg, field);
+const INFO = (code, msg, field) => f(Severity.INFO, code, msg, field);
 
-// ── Semantic validators ───────────────────────────
+function jpfx(type, sub) { return sub ? `ld+json:${type}.${sub}` : `ld+json:${type}`; }
 
-function validateUrls(data, type, warnings) {
+// ── Semantic validators ────────────
+
+function validateUrls(data, type, findings) {
   const urlFields = ['url', 'sameAs', 'image', 'thumbnailUrl', 'item'];
   for (const field of urlFields) {
     const val = data[field];
     if (!val) continue;
-    if (Array.isArray(val)) {
-      for (let i = 0; i < val.length; i++) {
-        if (typeof val[i] === 'string' && !isAbsoluteUrl(val[i])) {
-          warnings.push(`${type}: ${field}[${i}] is not an absolute URL`);
-        }
+    const doCheck = (v, i) => {
+      if (typeof v === 'string' && !isAbsoluteUrl(v)) {
+        const pfx = i != null ? `${field}[${i}]` : field;
+        findings.push(WARN('JSONLD_URL_RELATIVE', `${type}: ${pfx} non è un URL assoluto`, jpfx(type, pfx)));
       }
-    } else if (typeof val === 'string' && !isAbsoluteUrl(val)) {
-      warnings.push(`${type}: ${field} is not an absolute URL`);
-    } else if (typeof val === 'object' && val['@type'] === 'ImageObject' && val.url && typeof val.url === 'string' && !isAbsoluteUrl(val.url)) {
-      warnings.push(`${type}: ${field}.url is not an absolute URL`);
-    }
+    };
+    if (Array.isArray(val)) val.forEach((v, i) => doCheck(v, i));
+    else doCheck(val);
   }
-  // Check nested objects with URLs
-  scanNestedUrls(data, type, warnings);
+  scanNestedUrls(data, type, findings, '');
 }
 
-function scanNestedUrls(obj, type, warnings, path = '') {
+function scanNestedUrls(obj, type, findings, path) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
   for (const [k, v] of Object.entries(obj)) {
     if (k.startsWith('@')) continue;
-    if (typeof v === 'string' && (k === 'url' || k === 'sameAs' || k === 'image' || k === 'thumbnailUrl' || k === 'item')) {
-      if (!isAbsoluteUrl(v)) {
-        warnings.push(`${type}: ${path}${k} is not an absolute URL`);
-      }
+    if (typeof v === 'string' && ['url','sameAs','image','thumbnailUrl','item'].includes(k)) {
+      if (!isAbsoluteUrl(v))
+        findings.push(WARN('JSONLD_URL_RELATIVE', `${type}: ${path}${k} non è un URL assoluto`, jpfx(type, path + k)));
     } else if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
-      scanNestedUrls(v, type, warnings, path + k + '.');
+      scanNestedUrls(v, type, findings, path + k + '.');
     }
   }
 }
 
-function validateDates(data, type, warnings) {
-  const dateFields = ['datePublished', 'dateModified', 'startDate', 'endDate', 'foundingDate'];
-  for (const field of dateFields) {
-    const val = data[field];
-    if (val && typeof val === 'string' && !isISO8601(val)) {
-      warnings.push(`${type}: ${field} is not ISO 8601 format`);
-    }
+function validateDates(data, type, findings) {
+  for (const field of ['datePublished','dateModified','startDate','endDate','foundingDate']) {
+    const v = data[field];
+    if (v && typeof v === 'string' && !isISO8601(v))
+      findings.push(INFO('JSONLD_DATE_NOT_ISO8601', `${type}: ${field} non in formato ISO 8601`, jpfx(type, field)));
   }
 }
 
-function validateOrganization(data, type, warnings) {
-  const isOrg = type === 'Organization' || type === 'Corporation' ||
-    type === 'LocalBusiness' || type.endsWith('Store') || type.endsWith('Restaurant');
+function validateOrganization(data, type, findings) {
+  const isOrg = ['Organization','Corporation','LocalBusiness'].includes(type) ||
+    type.endsWith('Store') || type.endsWith('Restaurant');
   if (!isOrg) return;
-
-  if (data.logo) {
-    if (typeof data.logo === 'string' && !isAbsoluteUrl(data.logo)) {
-      warnings.push(`${type}: logo must be an absolute URL`);
-    } else if (typeof data.logo === 'object' && data.logo['@type'] === 'ImageObject') {
-      if (!data.logo.width && !data.logo.height) {
-        warnings.push(`${type}: logo ImageObject missing dimensions`);
-      }
-    }
+  if (data.logo && typeof data.logo === 'object' && data.logo['@type'] === 'ImageObject') {
+    if (!data.logo.width && !data.logo.height)
+      findings.push(INFO('JSONLD_REQUIRED_FIELD_MISSING', `${type}: logo ImageObject senza dimensioni dichiarate`, jpfx(type, 'logo')));
   }
-
-  if (type === 'LocalBusiness' || type.endsWith('Store') || type.endsWith('Restaurant')) {
-    if (!data.address) {
-      warnings.push(`${type}: missing address`);
-    } else if (typeof data.address === 'string') {
-      warnings.push(`${type}: address should be PostalAddress, not a plain string`);
-    }
-    if (!data.telephone) {
-      warnings.push(`${type}: missing telephone`);
-    }
+  if (['LocalBusiness','Store','Restaurant'].some(s => type.endsWith(s))) {
+    if (!data.address)
+      findings.push(WARN('JSONLD_REQUIRED_FIELD_MISSING', `${type}: address assente`, jpfx(type, 'address')));
+    else if (typeof data.address === 'string')
+      findings.push(INFO('JSONLD_REQUIRED_FIELD_MISSING', `${type}: address dovrebbe essere un PostalAddress, non una stringa`, jpfx(type, 'address')));
+    if (!data.telephone)
+      findings.push(INFO('JSONLD_REQUIRED_FIELD_MISSING', `${type}: telephone assente`, jpfx(type, 'telephone')));
   }
 }
 
-function validateBreadcrumb(data, type, warnings) {
+function validateBreadcrumb(data, type, findings) {
   if (type !== 'BreadcrumbList') return;
   const items = data.itemListElement;
   if (!Array.isArray(items)) {
-    warnings.push('BreadcrumbList: itemListElement must be an array');
+    findings.push(WARN('JSONLD_BREADCRUMB_ITEM_INCOMPLETE', 'BreadcrumbList: itemListElement non è un array', jpfx(type, 'itemListElement')));
     return;
   }
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     if (!item || item['@type'] !== 'ListItem') continue;
-    const idx = i + 1;
-    if (item.position != idx) {
-      warnings.push(`BreadcrumbList[${i}]: position should be ${idx}, got ${item.position}`);
-    }
-    if (!item.name) {
-      warnings.push(`BreadcrumbList[${i}]: missing name`);
-    }
+    if (item.position != i + 1)
+      findings.push(WARN('JSONLD_BREADCRUMB_ITEM_INCOMPLETE', `BreadcrumbList[${i}]: position dovrebbe essere ${i + 1}`, jpfx(type, `itemListElement[${i}].position`)));
+    if (!item.name)
+      findings.push(WARN('JSONLD_BREADCRUMB_ITEM_INCOMPLETE', `BreadcrumbList[${i}]: name assente`, jpfx(type, `itemListElement[${i}].name`)));
     const it = item.item;
-    if (!it) {
-      warnings.push(`BreadcrumbList[${i}]: missing item URL`);
-    } else if (typeof it === 'string' && !isAbsoluteUrl(it)) {
-      warnings.push(`BreadcrumbList[${i}]: item is not an absolute URL`);
-    }
+    if (!it)
+      findings.push(WARN('JSONLD_BREADCRUMB_ITEM_INCOMPLETE', `BreadcrumbList[${i}]: item URL assente`, jpfx(type, `itemListElement[${i}].item`)));
+    else if (typeof it === 'string' && !isAbsoluteUrl(it))
+      findings.push(WARN('JSONLD_URL_RELATIVE', `BreadcrumbList[${i}]: item non è un URL assoluto`, jpfx(type, `itemListElement[${i}].item`)));
   }
 }
 
-function validateImage(data, type, warnings) {
+function validateImage(data, type, findings) {
   if (!data.image) return;
   const check = (img) => {
     if (typeof img === 'object' && img['@type'] === 'ImageObject') {
-      const w = parseInt(img.width, 10);
-      const h = parseInt(img.height, 10);
-      if (w && w < 696) warnings.push(`${type}: image width ${w}px — min 696px recommended`);
-      if (h && h < 300) warnings.push(`${type}: image height ${h}px — min 300px recommended`);
+      const w = parseInt(img.width, 10), h = parseInt(img.height, 10);
+      if (w && w < 696) findings.push(INFO('JSONLD_DEPRECATED_TYPE', `${type}: image larghezza ${w}px — almeno 696px raccomandati per rich results`, jpfx(type, 'image')));
+      if (h && h < 300) findings.push(INFO('JSONLD_DEPRECATED_TYPE', `${type}: image altezza ${h}px — almeno 300px raccomandati per rich results`, jpfx(type, 'image')));
     }
   };
-  if (Array.isArray(data.image)) {
-    data.image.forEach(check);
-  } else {
-    check(data.image);
+  (Array.isArray(data.image) ? data.image : [data.image]).forEach(check);
+}
+
+function validateDeprecated(data, findings) {
+  const types = Array.isArray(data['@type']) ? data['@type'] : [data['@type']];
+  for (const t of types) {
+    if (DEPRECATED_TYPES.includes(t))
+      findings.push(INFO('JSONLD_DEPRECATED_TYPE', `${t} è deprecato — non più eleggibile per rich results`));
   }
 }
 
-function validateDeprecated(data, warnings) {
-  const types = data['@type'];
-  const all = Array.isArray(types) ? types : (types ? [types] : []);
-  for (const t of all) {
-    if (DEPRECATED_TYPES.includes(t)) {
-      warnings.push(`${t} is deprecated — no longer eligible for rich results`);
-    }
-  }
-}
+// ── Block builder ──────────────────
 
-// ── Block builder ────────────────────────────────
-
-function buildBlock(data, parentContext) {
+function buildBlock(data, parentContext, findings, blockIdx) {
   const types = data['@type'];
   const primaryType = Array.isArray(types) ? types[0] : (types || null);
-  const { valid: ctxValid, context } = validateContext(data, parentContext);
-  const warnings = validateRequired(primaryType, data);
+  const { valid: ctxValid, context } = (() => {
+    const ctx = data['@context'] || parentContext;
+    return { valid: isValidContext(ctx), context: ctx || null };
+  })();
 
   let status = 'ok';
+
   if (!primaryType) {
     status = 'no_type';
-    warnings.push('Missing @type — block will be ignored by Google');
+    findings.push(ERR('JSONLD_TYPE_MISSING', `Blocco JSON-LD senza @type — sarà ignorato da Google`, `ld+json[${blockIdx}]`));
   } else if (!ctxValid && context) {
     status = 'unknown_context';
-    warnings.push(`Unknown @context: ${context}`);
+    findings.push(WARN('JSONLD_CONTEXT_NOT_SCHEMAORG', `${primaryType}: @context="${context}" non riconducibile a schema.org`, `ld+json:${primaryType}[${blockIdx}]`));
   }
 
-  if (status === 'ok') {
-    validateUrls(data, primaryType, warnings);
-    validateDates(data, primaryType, warnings);
-    validateOrganization(data, primaryType, warnings);
-    validateBreadcrumb(data, primaryType, warnings);
-    validateImage(data, primaryType, warnings);
-    validateDeprecated(data, warnings);
+  if (status === 'ok' && primaryType) {
+    const req = REQUIRED[primaryType];
+    if (req) {
+      for (const field of req) {
+        if (data[field] == null || data[field] === '')
+          findings.push(ERR('JSONLD_REQUIRED_FIELD_MISSING', `${primaryType}: campo obbligatorio "${field}" assente`, jpfx(primaryType, field)));
+      }
+    } else {
+      findings.push(INFO('JSONLD_TYPE_UNRECOGNIZED', `${primaryType}: tipo non mappato dal validatore (nessuna validazione extra eseguita)`, `ld+json:${primaryType}[${blockIdx}]`));
+    }
+    validateUrls(data, primaryType, findings);
+    validateDates(data, primaryType, findings);
+    validateOrganization(data, primaryType, findings);
+    validateBreadcrumb(data, primaryType, findings);
+    validateImage(data, primaryType, findings);
+    validateDeprecated(data, findings);
   }
 
   const clean = {};
-  for (const [k, v] of Object.entries(data)) {
-    clean[k] = v;
-  }
+  for (const [k, v] of Object.entries(data)) clean[k] = v;
 
   return {
     type: primaryType,
@@ -236,76 +196,58 @@ function buildBlock(data, parentContext) {
     status,
     context,
     contextValid: ctxValid,
-    warnings,
     data: clean,
   };
 }
 
-// ── Extraction ────────────────────────────────────
+// ── Extraction ─────────────────────
 
 export function parseJsonLd($) {
   const blocks = [];
+  const findings = [];
 
   $('script[type="application/ld+json"]').each((_, el) => {
     const raw = ($(el).text() || '').trim();
-
     if (!raw) {
-      blocks.push({
-        type: null, typeAll: [], status: 'empty',
-        context: null, contextValid: false,
-        warnings: ['Empty JSON-LD block'], data: { _raw: '' },
-      });
+      blocks.push({ type: null, typeAll: [], status: 'empty', context: null, contextValid: false, data: { _raw: '' } });
+      findings.push(INFO('JSONLD_PARSE_ERROR', `Blocco JSON-LD vuoto — presente ma senza contenuto`, `script[${blocks.length}]`));
       return;
     }
-
     try {
       const parsed = JSON.parse(raw);
-      const flattened = flattenGraph(parsed);
-      blocks.push(...flattened);
-    } catch (e) {
-      blocks.push({
-        type: null, typeAll: [], status: 'parse_error',
-        context: null, contextValid: false,
-        warnings: [`Parse error: ${e.message}`], data: { _raw: raw.slice(0, 300) },
+      const flattened = flattenGraph(parsed, findings);
+      const startIdx = blocks.length;
+      flattened.forEach((b, i) => {
+        b._blockIdx = startIdx + i;
+        blocks.push(b);
       });
+    } catch (e) {
+      blocks.push({ type: null, typeAll: [], status: 'parse_error', context: null, contextValid: false, data: { _raw: raw.slice(0, 300) } });
+      findings.push(ERR('JSONLD_PARSE_ERROR', `Errore di parsing JSON: ${e.message}`, `script[${blocks.length}]`));
     }
   });
 
-  // Post-processing: detect duplicate @type across blocks
+  // Post-processing: detect duplicate @type
   const typeCount = {};
   for (const b of blocks) {
-    if (b.type) {
-      typeCount[b.type] = (typeCount[b.type] || 0) + 1;
-    }
+    if (b.type) typeCount[b.type] = (typeCount[b.type] || 0) + 1;
   }
   for (const [t, c] of Object.entries(typeCount)) {
     if (c > 1) {
-      const first = blocks.find((b) => b.type === t);
+      const first = blocks.find(b => b.type === t && b._blockIdx != null);
       if (first) {
-        first.warnings.push(`Duplicate @type "${t}": ${c}× — possible plugin conflict`);
+        findings.push(WARN('JSONLD_DUPLICATE_TYPE', `@type "${t}" dichiarato ${c}× in blocchi diversi — possibile conflitto tra plugin/generatori`, `ld+json:${t}`));
       }
     }
   }
 
-  // Collect all block warnings into a flat array
-  const warnings = [];
-  for (const b of blocks) {
-    for (const w of b.warnings) {
-      const prefix = b.type ? `[JSON-LD ${b.type}] ` : '[JSON-LD] ';
-      warnings.push(prefix + w);
-    }
-  }
-
-  return { blocks, warnings };
+  return { blocks, findings };
 }
 
-function flattenGraph(data) {
+function flattenGraph(data, findings) {
   const graph = data['@graph'];
   if (Array.isArray(graph)) {
-    return graph.map((item) => {
-      const ctx = item['@context'] || data['@context'] || null;
-      return buildBlock(item, ctx);
-    });
+    return graph.map((item) => buildBlock(item, data['@context'] || null, findings, -1));
   }
-  return [buildBlock(data, null)];
+  return [buildBlock(data, null, findings, -1)];
 }

@@ -5,6 +5,7 @@ import { scrape } from './src/scraper.mjs';
 import { scrapeWithBrowser, closeBrowser } from './src/puppeteer.mjs';
 import { buildPreviews } from './src/previews.mjs';
 import { validateOpenGraph, validateOgImage } from './src/opengraph.mjs';
+import { sortFindings } from './src/findings.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -34,17 +35,21 @@ app.post('/api/debug', async (req, res) => {
       ? await scrapeWithBrowser(parsedUrl.href)
       : await scrape(parsedUrl.href);
 
-    const { previews, warnings, flags } = buildPreviews(result.meta);
-    const ogValidation = validateOpenGraph(result.meta);
-    const ogImageValidation = await validateOgImage(result.meta.og.image);
+    const { previews } = buildPreviews(result.meta);
+    const og = validateOpenGraph(result.meta);
+    const ogImg = await validateOgImage(result.meta.og.image);
+
+    const findings = sortFindings([
+      ...og.findings,
+      ...ogImg.findings,
+      ...(result.meta.jldFindings || []),
+    ]);
 
     res.json({
       url: result.finalUrl,
       meta: result.meta,
       previews,
-      warnings: [...warnings, ...ogValidation.warnings, ...ogImageValidation.warnings, ...(result.meta.jldWarnings || [])],
-      flags: { ...flags, ...ogValidation.flags },
-      notes: [...ogValidation.notes, ...ogImageValidation.notes],
+      findings,
       jsRender: result.jsRender,
       screenshotUrl: result.screenshotUrl || null,
     });

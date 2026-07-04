@@ -17,10 +17,12 @@
 - [x] Cookie banner dismiss in Puppeteer
 - [x] User-agent browser reale per Puppeteer
 - [x] Page load: `domcontentloaded` + delay instead of `networkidle2`
-- [x] JSON-LD: modulo dedicato (src/jsonld.mjs) con validazione tipi, URL, date, BreadcrumbList
-- [x] JSON-LD: flatten `@graph`, detection duplicati, tipi deprecati, organizzazione, immagini
-- [x] JSON-LD: unified warnings pipeline (blocco ⚠ → top-level alerts)
+- [x] Findings pipeline: severity taxonomy (error/warning/info), unified `findings[]` in API response
 - [x] OG: modulo dedicato (src/opengraph.mjs) con validazione tag obbligatori, immagine, coerenza
 - [x] OG: image HEAD request (reachability, size, content-type) + icon/favicon heuristic
 - [x] OG: og:url vs canonical cross-check
-- [x] Report: smarter truncation per oggetti (keys invece di JSON crudo)
+- [x] Twitter findings (TWITTER_CARD_MISSING, TWITTER_IMAGE_MISSING, TWITTER_TITLE_MISSING)
+- [x] JSON-LD: modulo dedicato (src/jsonld.mjs) con validazione tipi, URL, date, BreadcrumbList
+- [x] JSON-LD: flatten `@graph`, detection duplicati, tipi deprecati, organizzazione, immagini
+- [x] JSON-LD: all findings in joint pipeline, no inline warnings in blocks
+- [x] Report: unified findings section (ERROR→WARNING→INFO), structured JSON-LD key listing

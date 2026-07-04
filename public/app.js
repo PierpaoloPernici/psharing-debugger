@@ -51,7 +51,7 @@ form.addEventListener('submit', async (e) => {
       return;
     }
 
-    renderAlerts(data.warnings || [], data.flags || {}, data.notes || []);
+    renderFindings(data.findings || []);
     renderSiteInfo(data.url, data.meta.general, data.jsRender);
     renderScreenshot(data.screenshotUrl);
     renderPreviews(data.previews, data.meta.general.favicon);
@@ -173,48 +173,25 @@ function renderLinkedin(li, favicon) {
   `;
 }
 
-const flagMessages = {
-  fallbackOgTitle: 'og:title mancante — usato il <title> HTML come fallback',
-  titleMismatch: 'og:title e <title> HTML differiscono',
-  missingTwitterCard: 'twitter:card mancante — Twitter userà i tag Open Graph',
-  twitterFallsBackToOg: 'twitter:image mancante — Twitter userà og:image come fallback',
+const severityConfig = {
+  error:   { border: 'border-red-200 dark:border-red-800', bg: 'bg-red-50 dark:bg-red-900/20', text: 'text-red-800 dark:text-red-200', icon: 'octagon-alert', iconColor: 'text-red-500' },
+  warning: { border: 'border-amber-200 dark:border-amber-700', bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-800 dark:text-amber-200', icon: 'triangle-alert', iconColor: 'text-amber-500' },
+  info:    { border: 'border-blue-200 dark:border-blue-800', bg: 'bg-blue-50 dark:bg-blue-900/20', text: 'text-blue-800 dark:text-blue-200', icon: 'info', iconColor: 'text-blue-500' },
 };
 
-function renderAlerts(warnings, flags, notes = []) {
-  const items = [];
-
-  warnings.forEach((w) => {
-    items.push({ type: 'warning', msg: w });
-  });
-
-  Object.entries(flagMessages)
-    .filter(([key]) => flags[key])
-    .forEach(([key, msg]) => {
-      items.push({ type: 'info', msg });
-    });
-
-  notes.forEach((n) => {
-    items.push({ type: 'note', msg: n });
-  });
-
-  if (!items.length) {
+function renderFindings(findings) {
+  if (!findings || !findings.length) {
     warningsEl.innerHTML = '';
     return;
   }
 
-  const total = items.length;
-  const grouped = total > 3;
+  const grouped = findings.length > 3;
 
-  const alertHtml = items.map((item) => {
-    const t = item.type;
-    const colors = t === 'warning'
-      ? { border: 'border-amber-200 dark:border-amber-700', bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-800 dark:text-amber-200', icon: 'triangle-alert', iconColor: 'text-amber-500' }
-      : t === 'info'
-      ? { border: 'border-blue-200 dark:border-blue-800', bg: 'bg-blue-50 dark:bg-blue-900/20', text: 'text-blue-800 dark:text-blue-200', icon: 'info', iconColor: 'text-blue-500' }
-      : { border: 'border-slate-200 dark:border-slate-700', bg: 'bg-slate-50 dark:bg-slate-800/40', text: 'text-slate-600 dark:text-slate-400', icon: 'lightbulb', iconColor: 'text-slate-400' };
-    return `<div class="flex items-start gap-2.5 rounded-xl border ${colors.border} ${colors.bg} px-4 py-3 text-sm ${colors.text}">
-      <i data-lucide="${colors.icon}" class="w-4 h-4 mt-0.5 shrink-0 ${colors.iconColor}"></i>
-      <span>${escapeHtml(item.msg)}</span>
+  const alertHtml = findings.map((f) => {
+    const c = severityConfig[f.severity] || severityConfig.info;
+    return `<div class="flex items-start gap-2.5 rounded-xl border ${c.border} ${c.bg} px-4 py-3 text-sm ${c.text}">
+      <i data-lucide="${c.icon}" class="w-4 h-4 mt-0.5 shrink-0 ${c.iconColor}"></i>
+      <span>${escapeHtml(f.message)}</span>
     </div>`;
   }).join('');
 
@@ -223,7 +200,7 @@ function renderAlerts(warnings, flags, notes = []) {
       <details class="group rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden shadow-sm">
         <summary class="flex items-center gap-2 px-5 py-3 text-sm font-semibold text-slate-600 dark:text-slate-300 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors select-none marker:content-none list-none">
           <i data-lucide="chevron-right" class="w-4 h-4 transition-transform group-open:rotate-90 text-slate-400"></i>
-          Avvisi (${total})
+          Findings (${findings.length})
           <span class="ml-auto text-xs text-slate-400 dark:text-slate-500 font-normal">clicca per espandere</span>
         </summary>
         <div class="p-4 space-y-2 border-t border-slate-100 dark:border-slate-700/50">
@@ -258,10 +235,9 @@ function renderRawData(meta) {
       const prefix = `@${typeLabel}`;
       const data = block.data || {};
 
-      // Non-ok blocks: just show the raw content or error
+      // Non-ok blocks: just show the raw content
       if (status !== 'ok') {
-        rows.push({ property: `ld+json:${typeLabel}`, value: (block.warnings || []).join(' | ') });
-        if (data._raw) rows.push({ property: `${prefix} raw`, value: data._raw });
+        rows.push({ property: `ld+json:${typeLabel} [${status}]`, value: data._raw || status });
         continue;
       }
 
@@ -350,36 +326,18 @@ function buildReport(data) {
   lines.push(`**Analisi:** ${mode}`);
   lines.push(`**Data:** ${now}`);
 
-  // Alerts section
-  const warnings = data.warnings || [];
-  const flags = data.flags || {};
-  const flagMsgs = Object.entries(flagMessages)
-    .filter(([key]) => flags[key])
-    .map(([, msg]) => msg);
-  const allAlerts = [...warnings, ...flagMsgs];
-
-  const notes = data.notes || [];
-  const allNotes = [...notes];
-
-  if (allAlerts.length) {
+  // Findings section
+  const findings = data.findings || [];
+  if (findings.length) {
     lines.push('');
     lines.push('---');
     lines.push('');
-    lines.push('## Avvisi');
+    lines.push('## Findings');
     lines.push('');
-    for (const msg of allAlerts) {
-      lines.push(`- ⚠ ${msg}`);
-    }
-  }
-
-  if (allNotes.length) {
-    lines.push('');
-    lines.push('---');
-    lines.push('');
-    lines.push('## Note');
-    lines.push('');
-    for (const msg of allNotes) {
-      lines.push(`- ${msg}`);
+    for (const f of findings) {
+      const pfx = f.severity === 'error' ? '🔴' : f.severity === 'warning' ? '⚠️' : 'ℹ️';
+      lines.push(`- ${pfx} [${f.category}] ${f.message}`);
+      if (f.field) lines.push(`  (campo: ${f.field})`);
     }
   }
 
@@ -423,11 +381,9 @@ function buildReport(data) {
     lines.push('');
     for (const block of jsonld) {
       const t = block.type || (block.status === 'parse_error' ? 'parse error' : block.status === 'empty' ? 'empty' : 'unknown');
-      const statusTag = block.status === 'ok' ? '' : ` [${block.status}]`;
-      lines.push(`#### ${t}${statusTag}`);
+      lines.push(`#### ${t}${block.status !== 'ok' ? ` [${block.status}]` : ''}`);
       lines.push('');
       if (block.context) lines.push(`- @context: ${block.context}`);
-      for (const w of (block.warnings || [])) lines.push(`- ⚠ ${w}`);
 
       if (block.status === 'ok') {
         const keys = Object.keys(block.data || {}).filter((k) => !k.startsWith('@'));

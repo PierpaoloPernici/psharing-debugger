@@ -1,143 +1,178 @@
-/**
- * Open Graph tag validation.
- * Checks OG tags against Facebook/LinkedIn requirements.
- */
+import { Severity, Category } from './findings.mjs';
 
 function isAbsoluteUrl(s) {
   return /^https?:\/\//i.test(String(s || ''));
 }
 
+function f(severity, code, msg, field) {
+  return { severity, category: Category.OG, code, message: msg, field };
+}
+
+function fi(severity, code, msg, field) {
+  return { severity, category: Category.OG, code, message: msg, field };
+}
+
 /**
- * @param {object} meta — { og, twitter, general, all }
- * @returns {{ warnings: string[], flags: object, notes: string[] }}
+ * Sync OG validation. Returns { findings: Finding[] }.
  */
 export function validateOpenGraph(meta) {
   const { og, twitter, general, all = [] } = meta;
-  const warnings = [];
-  const flags = {};
-  const notes = [];
+  const findings = [];
 
-  // ── 1. Required tags ────────────────────────────
+  // ── Required tags ───────────────────────────────
 
   if (!og.title) {
-    warnings.push('Missing og:title — Facebook/LinkedIn require it for link previews');
+    findings.push(f(Severity.ERROR, 'OG_TITLE_MISSING', 'og:title assente — Facebook/LinkedIn richiedono questo tag'));
   }
   if (!og.type) {
-    notes.push('Missing og:type — default will be "website"');
+    findings.push(f(Severity.INFO, 'OG_TYPE_MISSING', 'og:type assente — sarà usato il default "website"'));
   }
-  if (!og.image) {
-    warnings.push('Missing og:image — no preview image on Facebook/LinkedIn');
-  } else if (!isAbsoluteUrl(og.image)) {
-    warnings.push('og:image is a relative URL — social crawlers will ignore it');
+  if (!og.image && !twitter.image) {
+    findings.push(f(Severity.ERROR, 'OG_IMAGE_MISSING', 'og:image assente — nessuna immagine di anteprima su Facebook/LinkedIn'));
+  } else if (og.image && !isAbsoluteUrl(og.image)) {
+    findings.push(f(Severity.ERROR, 'OG_IMAGE_RELATIVE_URL', 'og:image è un URL relativo — i crawler social lo ignoreranno'));
   }
   if (!og.url) {
-    notes.push('Missing og:url — crawlers may use the wrong canonical URL');
+    findings.push(f(Severity.WARNING, 'OG_URL_MISSING', 'og:url assente — i crawler useranno l\'URL richiesto, che potrebbe non essere il canonico'));
   } else if (!isAbsoluteUrl(og.url)) {
-    warnings.push('og:url is a relative URL — crawlers may reject it');
+    findings.push(f(Severity.WARNING, 'OG_URL_RELATIVE_URL', 'og:url è un URL relativo — i crawler potrebbero rifiutarlo'));
   }
 
-  // ── 2. og:image deep checks ─────────────────────
+  // ── og:image depth checks (sync, from meta) ─────
 
   if (og.image && isAbsoluteUrl(og.image)) {
     const iw = parseInt(og['image:width'], 10) || 0;
     const ih = parseInt(og['image:height'], 10) || 0;
 
     if (!iw || !ih) {
-      notes.push('og:image:width / og:image:height not set — crawler must download image to measure, slowing preview');
+      findings.push(f(Severity.INFO, 'OG_IMAGE_DIMENSIONS_NOT_DECLARED',
+        'og:image:width / og:image:height non dichiarati — il crawler deve scaricare l\'immagine per misurarla, rallentando la generazione dell\'anteprima'));
     }
 
     if (iw > 0 && ih > 0) {
       if (iw < 200 || ih < 200) {
-        warnings.push(`og:image too small (${iw}×${ih}px) — min 200×200px required`);
+        findings.push(f(Severity.ERROR, 'OG_IMAGE_TOO_SMALL',
+          `og:image troppo piccola (${iw}×${ih}px) — minimo 200×200px richiesto per qualsiasi preview`));
       }
-      if (iw < 600) {
-        notes.push(`og:image width ${iw}px — recommended ≥ 1200px for full-width Facebook preview`);
+      if (iw >= 200 && iw < 1200) {
+        findings.push(f(Severity.WARNING, 'OG_IMAGE_BELOW_RECOMMENDED',
+          `og:image larghezza ${iw}px — sotto i 1200px raccomandati per anteprime piene su Facebook/LinkedIn`));
       }
       const ratio = iw / ih;
       if (ratio < 1.7 || ratio > 2.1) {
-        notes.push(`og:image aspect ratio ${ratio.toFixed(2)}:1 — ideal is ~1.91:1; Facebook may crop awkwardly`);
+        findings.push(f(Severity.INFO, 'OG_IMAGE_BAD_ASPECT_RATIO',
+          `og:image aspect ratio ${ratio.toFixed(2)}:1 — lontano dall'ideale 1.91:1, Facebook potrebbe ritagliare male`));
       }
     }
 
     // Format check
-    const urlPath = og.image.split('?')[0].split('#')[0];
-    const ext = (urlPath.split('.').pop() || '').toLowerCase();
-    const supported = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
-    if (ext && !supported.includes(ext)) {
-      notes.push(`og:image format ".${ext}" — social crawlers only support jpg/png/webp/gif. Consider converting`);
-    }
+    const ext = (og.image.split('?')[0].split('#')[0].split('.').pop() || '').toLowerCase();
     if (ext === 'webp') {
-      notes.push('og:image is WebP — older crawlers may not support it; provide a jpg/png fallback');
+      findings.push(f(Severity.INFO, 'OG_IMAGE_WEBP_FORMAT',
+        'og:image è in formato WebP — crawler datati potrebbero non supportarlo; usare jpg/png come fallback'));
+    } else if (ext && !['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+      findings.push(f(Severity.INFO, 'OG_IMAGE_UNSUPPORTED_FORMAT',
+        `og:image formato ".${ext}" — i crawler social supportano solo jpg/png/gif/webp`));
     }
   }
 
-  // ── 3. Content coherence ────────────────────────
+  // ── Content coherence ───────────────────────────
 
   if (og.title && general.title && og.title !== general.title) {
-    flags.titleMismatch = true;
+    findings.push(fi(Severity.INFO, 'TITLE_OG_TITLE_MISMATCH',
+      '<title> e og:title differiscono — intenzionale? Verificare la coerenza', 'title'));
   }
 
   if (og.description) {
     if (og.description.length > 300) {
-      notes.push(`og:description is ${og.description.length} chars — Facebook truncates at ~300`);
+      findings.push(f(Severity.INFO, 'OG_DESCRIPTION_TOO_LONG',
+        `og:description è ${og.description.length} caratteri — Facebook tronca oltre ~300`));
     }
     if (og.description.length > 200) {
-      notes.push(`og:description is ${og.description.length} chars — LinkedIn truncates at ~200`);
+      findings.push(f(Severity.INFO, 'OG_DESCRIPTION_TOO_LONG_LINKEDIN',
+        `og:description è ${og.description.length} caratteri — LinkedIn tronca oltre ~200`));
     }
     if (/^(test|placeholder|sample|description|descrizione|lorem ipsum|og description|meta description)$/i.test(og.description.trim())) {
-      warnings.push('og:description appears to be a placeholder — replace with actual content for accurate previews');
-    }
-  } else {
-    if (general.description) {
-      flags.descriptionFallback = true;
+      findings.push(f(Severity.WARNING, 'OG_TITLE_DESCRIPTION_PLACEHOLDER',
+        'og:description sembra un placeholder — sostituire con contenuto reale'));
     }
   }
 
-  // ── 4. Secondary tags ───────────────────────────
+  // ── Secondary tags ──────────────────────────────
 
   if (!og.site_name) {
-    notes.push('og:site_name missing — crawlers will show bare domain instead of brand name');
+    findings.push(f(Severity.INFO, 'OG_SITE_NAME_MISSING',
+      'og:site_name assente — i crawler mostreranno il dominio nudo invece del nome del brand'));
   }
   if (!og.locale) {
-    notes.push('og:locale missing — Facebook defaults to en_US');
+    findings.push(f(Severity.INFO, 'OG_LOCALE_MISSING',
+      'og:locale assente — Facebook assume en_US come default'));
   }
   if (og.type === 'article') {
     if (!og['article:published_time']) {
-      warnings.push('og:type is "article" but article:published_time is missing');
+      findings.push(f(Severity.WARNING, 'OG_ARTICLE_FIELDS_MISSING',
+        'og:type è "article" ma article:published_time è assente'));
     }
     if (!og['article:author']) {
-      notes.push('og:type is "article" but article:author is missing');
+      findings.push(f(Severity.INFO, 'OG_ARTICLE_FIELDS_MISSING',
+        'og:type è "article" ma article:author è assente'));
     }
   }
 
-  // ── 5. Duplicate OG tags ────────────────────────
+  // ── og:url vs canonical ─────────────────────────
 
-  const ogCounts = {};;
+  if (og.url && general.canonical && og.url !== general.canonical) {
+    findings.push(f(Severity.WARNING, 'CANONICAL_OG_URL_MISMATCH',
+      `og:url differisce dal canonical: og:url="${og.url}" vs canonical="${general.canonical}"`, 'og:url'));
+  }
+
+  // ── Twitter tags ────────────────────────────────
+
+  if (!twitter.title) {
+    findings.push(f(Severity.INFO, 'TWITTER_TITLE_MISSING', 'twitter:title assente — Twitter userà og:title come fallback'));
+  }
+  if (!twitter.card) {
+    findings.push(f(Severity.WARNING, 'TWITTER_CARD_MISSING', 'twitter:card assente — Twitter userà i tag Open Graph come fallback'));
+  }
+  if (!twitter.image && og.image) {
+    findings.push(f(Severity.INFO, 'TWITTER_IMAGE_MISSING', 'twitter:image assente — Twitter userà og:image come fallback'));
+  } else if (og.image && twitter.image && og.image !== twitter.image) {
+    findings.push(f(Severity.INFO, 'TWITTER_IMAGE_MISSING', 'twitter:image e og:image puntano a URL diversi — verificare la coerenza', 'twitter:image'));
+  }
+  if (og.image && !twitter.image) {
+    const iw = parseInt(og['image:width'], 10) || 0;
+    const ih = parseInt(og['image:height'], 10) || 0;
+    if (iw > 0 && (iw < 300 || ih < 157)) {
+      findings.push(f(Severity.WARNING, 'TWITTER_IMAGE_BELOW_MINIMUM',
+        `og:image (usata da Twitter come fallback) è ${iw}×${ih}px — sotto il minimo 300×157 per summary_large_image`));
+    }
+  }
+
+  // ── Duplicate OG tags ───────────────────────────
+
+  const ogCounts = {};
   for (const item of all) {
     if (item.property && item.property.startsWith('og:')) {
-      const key = item.property;
-      ogCounts[key] = (ogCounts[key] || 0) + 1;
+      ogCounts[item.property] = (ogCounts[item.property] || 0) + 1;
     }
   }
   for (const [key, count] of Object.entries(ogCounts)) {
     if (count > 1) {
-      warnings.push(`Duplicate OG tag "${key}" found ${count}× — possible SEO plugin conflict`);
+      findings.push(f(Severity.ERROR, 'OG_DUPLICATE_TAG',
+        `Tag OG duplicato "${key}" trovato ${count}× — conflitto tra plugin SEO?`, key));
     }
-    // Prevent explosion of duplicate warnings
-    if (warnings.length > 20) break;
+    if (findings.length > 30) break;
   }
 
-  return { warnings, flags, notes };
+  return { findings };
 }
 
 /**
- * Async check: does a HEAD request on og:image to verify reachability,
- * size, and format. Returns warnings/notes to merge into the report.
+ * Async: HEAD request on og:image. Returns { findings: Finding[] }.
  */
 export async function validateOgImage(ogImage) {
-  const warnings = [];
-  const notes = [];
-  if (!ogImage || !isAbsoluteUrl(ogImage)) return { warnings, notes };
+  const findings = [];
+  if (!ogImage || !isAbsoluteUrl(ogImage)) return { findings };
 
   try {
     const controller = new AbortController();
@@ -146,46 +181,47 @@ export async function validateOgImage(ogImage) {
     clearTimeout(timeout);
 
     if (!res.ok) {
-      warnings.push(`og:image returned HTTP ${res.status} — crawlers may fail to fetch it`);
-      return { warnings, notes };
+      findings.push(f(Severity.ERROR, 'OG_IMAGE_UNREACHABLE',
+        `og:image ha risposto HTTP ${res.status} — i crawler potrebbero non riuscire a scaricarla`, 'og:image'));
+      return { findings };
     }
 
     const type = (res.headers.get('content-type') || '').toLowerCase();
     const len = res.headers.get('content-length');
 
     if (type && !type.startsWith('image/')) {
-      warnings.push(`og:image Content-Type is "${type}" — expected an image`);
-    }
-    if (type && type.includes('webp')) {
-      notes.push('og:image is WebP — older crawlers may not support it; provide a jpg/png fallback');
+      findings.push(f(Severity.ERROR, 'OG_IMAGE_WRONG_CONTENT_TYPE',
+        `og:image Content-Type è "${type}" — ci si aspetta un\'immagine`));
     }
 
     // Heuristic: URL patterns that suggest tiny icons
     const low = ogImage.toLowerCase();
     if (/icon|favicon|apple|touch|precomposed|mask-icon|\d{1,3}x\d{1,3}|[-_]\d{2,4}[-_.]/.test(low.split('?')[0].split('#')[0])) {
-      warnings.push('og:image URL contains icon/favicon/apple-touch/small-size pattern — likely too small for social previews');
-      return { warnings, notes };
+      findings.push(f(Severity.WARNING, 'OG_IMAGE_LOOKS_LIKE_ICON',
+        'og:image ha pattern da icona/favicon/apple-touch — probabilmente troppo piccola per preview social', 'og:image'));
+      return { findings };
     }
 
     if (len) {
       const bytes = parseInt(len, 10);
       const mb = bytes / (1024 * 1024);
       if (mb > 8) {
-        warnings.push(`og:image is ${mb.toFixed(1)}MB — exceeds Facebook's 8MB limit`);
+        findings.push(f(Severity.WARNING, 'OG_IMAGE_TOO_LARGE',
+          `og:image è ${mb.toFixed(1)}MB — supera il limite Facebook di 8MB`));
       } else if (mb > 1) {
-        notes.push(`og:image is ${mb.toFixed(1)}MB — large files slow down preview generation`);
+        findings.push(f(Severity.INFO, 'OG_IMAGE_TOO_LARGE',
+          `og:image è ${mb.toFixed(1)}MB — file grande rallenta la generazione dell'anteprima`));
       }
     }
-
-    // If possible, try to read a small chunk to get image dimensions
-    // (Requires a GET with Range header — skipped for performance)
   } catch (e) {
     if (e.name === 'AbortError') {
-      warnings.push('og:image HEAD request timed out — image may be unreachable');
+      findings.push(f(Severity.WARNING, 'OG_IMAGE_UNREACHABLE',
+        'og:image HEAD request timeout — immagine potrebbe non essere raggiungibile'));
     } else {
-      warnings.push(`og:image fetch failed: ${e.message}`);
+      findings.push(f(Severity.WARNING, 'OG_IMAGE_UNREACHABLE',
+        `og:image fetch fallito: ${e.message}`));
     }
   }
 
-  return { warnings, notes };
+  return { findings };
 }
