@@ -14,23 +14,28 @@ const PORT = process.env.PORT || 3333;
 const HOST = process.env.HOST || '127.0.0.1';
 
 // --- Request logger ---
+const REQUEST_LOG = (process.env.REQUEST_LOG || 'all').toLowerCase();
+
 const logDir = path.join(__dirname, 'logs');
 const logFile = path.join(logDir, 'requests.log');
 
 // Ensure logs directory exists (fail silently if already there)
 try { fs.mkdirSync(logDir, { recursive: true }); } catch {}
 
+function shouldLog(req) {
+  if (REQUEST_LOG === 'all') return true;
+  if (REQUEST_LOG === 'none') return false;
+  if (REQUEST_LOG === 'debug') return req.method === 'POST' && req.path === '/api/debug';
+  return true; // fallback: logga tutto
+}
+
 function getClientIp(req) {
-  // Cloudflare
   const cf = req.headers['cf-connecting-ip'];
   if (cf) return cf;
-  // Proxy standard (X-Forwarded-For prende il primo IP della catena)
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) return forwarded.split(',')[0].trim();
-  // X-Real-IP (Nginx, HAProxy, altri proxy)
   const realIp = req.headers['x-real-ip'];
   if (realIp) return realIp;
-  // Fallback a connessione diretta
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
@@ -38,6 +43,7 @@ function logRequest(req, res, next) {
   const start = Date.now();
   const clientIp = getClientIp(req);
   res.on('finish', () => {
+    if (!shouldLog(req)) return;
     const duration = Date.now() - start;
     const targetUrl = req.body?.url || '-';
     const line = `[${new Date().toISOString()}] ${clientIp} ${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms ${targetUrl}\n`;
