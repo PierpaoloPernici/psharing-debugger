@@ -27,3 +27,10 @@
 - [x] JSON-LD: modulo dedicato (src/jsonld.mjs) con validazione tipi, URL, date, BreadcrumbList
 - [x] JSON-LD: flatten `@graph`, detection duplicati, tipi deprecati, organizzazione, immagini
 - [x] JSON-LD: all findings in joint pipeline, no inline warnings in blocks
+- [x] JSON-LD: root-level array normalization + @graph container skip (no false JSONLD_TYPE_MISSING)
+- [x] JSON-LD: node indices correct (ld+json[scriptIdx][nodeIdx]), never -1
+- [x] JSON-LD: JSONLD_CONTEXT_MISSING for nodes without @context, distinct from NOT_SCHEMAORG
+- [x] JSON-LD toggle (opt-in, off by default)
+- [x] Favicon reachability check (FAVICON_MISSING + FAVICON_UNREACHABLE)
+- [x] CNN.com fix: browser UA + gzip + auto fallback to Puppeteer on 4xx
+- [x] AGENTS.md + TODO.md + README aggiornati
